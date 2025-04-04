@@ -1,0 +1,51 @@
+Dataset Analysis: car_prices
+==================================================
+
+Basic Information:
+--------------------------------------------------
+<class 'pandas.core.frame.DataFrame'>
+Index: 558799 entries, 2014-01-01 09:15:00+08:00 to 2015-07-21 02:30:00+07:00
+Data columns (total 15 columns):
+ #   Column        Non-Null Count   Dtype  
+---  ------        --------------   -----  
+ 0   year          558799 non-null  float64
+ 1   make          548498 non-null  object 
+ 2   model         548400 non-null  object 
+ 3   trim          548148 non-null  object 
+ 4   body          545604 non-null  object 
+ 5   transmission  493448 non-null  object 
+ 6   vin           558799 non-null  object 
+ 7   state         558799 non-null  object 
+ 8   condition     547005 non-null  float64
+ 9   odometer      558705 non-null  float64
+ 10  color         558050 non-null  object 
+ 11  interior      558050 non-null  object 
+ 12  seller        558799 non-null  object 
+ 13  mmr           558799 non-null  float64
+ 14  sellingprice  558799 non-null  float64
+dtypes: float64(5), object(10)
+memory usage: 68.2+ MB
+
+Missing Values:
+--------------------------------------------------
+make            10301
+model           10399
+trim            10651
+body            13195
+transmission    65351
+condition       11794
+odometer           94
+color             749
+interior          749
+
+Numerical Columns Statistics:
+--------------------------------------------------
+                year      condition       odometer            mmr   sellingprice
+count  558799.000000  547005.000000  558705.000000  558799.000000  558799.000000
+mean     2010.038633      30.672557   68323.830415   13769.377495   13611.356296
+std         3.966830      13.402872   53398.133653    9679.967174    9749.728196
+min      1982.000000       1.000000       1.000000      25.000000       1.000000
+25%      2007.000000      23.000000   28374.000000    7100.000000    6900.000000
+50%      2012.000000      35.000000   52257.000000   12250.000000   12100.000000
+75%      2013.000000      42.000000   99114.000000   18300.000000   18200.000000
+max      2015.000000      49.000000  999999.000000  182000.000000  230000.000000
