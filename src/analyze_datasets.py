@@ -4,7 +4,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import seaborn as sns
-from .utils import create_directory, add_time_features, add_lag_features
+import sys
+
+# Add the project directory to the path to enable absolute imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Use absolute imports instead of relative imports
+from src.utils import create_directory, add_time_features, add_lag_features
 
 class DatasetAnalyzer:
     def __init__(self, data_path='data', output_path='data/processed'):
@@ -337,6 +343,130 @@ class DatasetAnalyzer:
             plt.close()
         
         print(f"Visualizations saved to {viz_path}")
+    
+    def preprocess_generic_data(self, df, date_col, target_col):
+        """
+        Preprocess a generic dataset for time series forecasting
+        
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            Raw dataset
+        date_col : str
+            Name of the date column
+        target_col : str
+            Name of the target column to forecast
+            
+        Returns:
+        --------
+        pd.DataFrame
+            Preprocessed dataset
+        """
+        print(f"Preprocessing generic dataset with date column: {date_col} and target column: {target_col}")
+        
+        # Create a copy of the dataset
+        processed_df = df.copy()
+        
+        # Convert date column to datetime
+        try:
+            processed_df[date_col] = pd.to_datetime(processed_df[date_col])
+            print(f"Converted {date_col} to datetime")
+        except Exception as e:
+            print(f"Warning: Error converting {date_col} to datetime: {str(e)}")
+            # Try to detect and convert various date formats
+            try:
+                processed_df[date_col] = pd.to_datetime(processed_df[date_col], errors='coerce')
+                # Drop rows with invalid dates
+                processed_df = processed_df.dropna(subset=[date_col])
+                print(f"Converted {date_col} to datetime with some error handling")
+            except:
+                raise ValueError(f"Could not convert {date_col} to datetime format")
+        
+        # Set date as index
+        processed_df = processed_df.set_index(date_col)
+        
+        # Sort by date
+        processed_df = processed_df.sort_index()
+        
+        # Handle missing values in the target column
+        if processed_df[target_col].isnull().sum() > 0:
+            print(f"Handling {processed_df[target_col].isnull().sum()} missing values in {target_col}")
+            # For small gaps, use linear interpolation
+            processed_df[target_col] = processed_df[target_col].interpolate(method='linear')
+            # For any remaining NaNs at the beginning or end, use forward/backward fill
+            processed_df[target_col] = processed_df[target_col].fillna(method='ffill').fillna(method='bfill')
+        
+        # Check for anomalies (values > 3 std from mean)
+        mean = processed_df[target_col].mean()
+        std = processed_df[target_col].std()
+        anomalies = processed_df[(processed_df[target_col] > mean + 3*std) | (processed_df[target_col] < mean - 3*std)]
+        
+        if len(anomalies) > 0:
+            print(f"Detected {len(anomalies)} potential anomalies in {target_col}")
+            
+            # If anomalies are less than 5% of the data, cap them
+            if len(anomalies) < 0.05 * len(processed_df):
+                print("Capping extreme values")
+                upper_limit = mean + 3*std
+                lower_limit = mean - 3*std
+                processed_df[target_col] = processed_df[target_col].clip(lower=lower_limit, upper=upper_limit)
+        
+        # Add basic time features
+        processed_df['year'] = processed_df.index.year
+        processed_df['month'] = processed_df.index.month
+        processed_df['day_of_week'] = processed_df.index.dayofweek
+        processed_df['day_of_year'] = processed_df.index.dayofyear
+        
+        # Check data frequency and resample if needed
+        inferred_freq = pd.infer_freq(processed_df.index)
+        if inferred_freq is None:
+            print("Warning: Could not infer data frequency. Checking for irregular timestamps...")
+            
+            # Check for duplicated timestamps
+            if processed_df.index.duplicated().any():
+                print(f"Found {processed_df.index.duplicated().sum()} duplicated timestamps")
+                # Keep the last value for each timestamp
+                processed_df = processed_df[~processed_df.index.duplicated(keep='last')]
+            
+            # Check for missing dates (significant gaps)
+            date_range = pd.date_range(start=processed_df.index.min(), end=processed_df.index.max())
+            missing_dates = set(date_range) - set(processed_df.index)
+            
+            if len(missing_dates) > 0:
+                pct_missing = len(missing_dates) / len(date_range) * 100
+                print(f"Missing {len(missing_dates)} dates ({pct_missing:.2f}% of the date range)")
+                
+                # If less than 20% of dates are missing, create a regular time series
+                if pct_missing < 20:
+                    # Try to infer the most likely frequency (daily, weekly, monthly)
+                    diff = processed_df.index.to_series().diff().median()
+                    
+                    if diff.days < 2:
+                        freq = 'D'  # Daily
+                    elif diff.days < 8:
+                        freq = 'W'  # Weekly
+                    elif diff.days < 32:
+                        freq = 'M'  # Monthly
+                    else:
+                        freq = None
+                    
+                    if freq:
+                        print(f"Resampling data to {freq} frequency")
+                        processed_df = processed_df.resample(freq).mean()
+                        # Fill any new NaN values created by resampling
+                        processed_df = processed_df.interpolate(method='linear')
+        else:
+            print(f"Detected data frequency: {inferred_freq}")
+        
+        # Ensure all columns have appropriate datatypes
+        for col in processed_df.columns:
+            if col != target_col and pd.api.types.is_numeric_dtype(processed_df[col]):
+                # Convert integers to integer type for better memory usage
+                if processed_df[col].fillna(0).astype(int).equals(processed_df[col].fillna(0)):
+                    processed_df[col] = processed_df[col].astype('Int64')  # Nullable integer type
+        
+        print(f"Preprocessing complete. Processed dataframe shape: {processed_df.shape}")
+        return processed_df
 
 def main():
     """
