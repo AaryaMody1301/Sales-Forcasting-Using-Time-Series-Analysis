@@ -53,8 +53,8 @@ For a complete list of dependencies, see the requirements.txt file.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/advanced-time-series-forecasting.git
-   cd advanced-time-series-forecasting
+   git clone https://github.com/yourusername/sales-forecasting-time-series.git
+   cd sales-forecasting-time-series
    ```
 
 2. Create a virtual environment (optional but recommended):
