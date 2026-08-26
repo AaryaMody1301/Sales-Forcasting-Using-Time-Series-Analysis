@@ -10,10 +10,22 @@ CAR_PRICES_DAILY_MEDIAN = DatasetSchema(
     target_col="sellingprice",
     frequency="D",
     aggregation="median",
+    timezone="America/Los_Angeles",
+)
+
+CAR_PRICES_WEEKLY_MEDIAN = DatasetSchema(
+    name="car_prices_weekly_median",
+    timestamp_col="saledate",
+    target_col="sellingprice",
+    frequency="W-SUN",
+    aggregation="median",
+    timezone="America/Los_Angeles",
 )
 
 _BUILTIN_SCHEMAS = {
     "car_prices": CAR_PRICES_DAILY_MEDIAN,
+    "car_prices_daily": CAR_PRICES_DAILY_MEDIAN,
+    "car_prices_weekly": CAR_PRICES_WEEKLY_MEDIAN,
 }
 
 

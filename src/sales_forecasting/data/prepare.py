@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
+from pandas.api.types import is_datetime64_any_dtype
 
 from .schema import DatasetContractError, DatasetSchema, PreparedSeries
 
@@ -14,13 +15,25 @@ def _parse_timestamps(values: pd.Series, timezone: str | None) -> pd.Series:
         raise DatasetContractError("timestamp column contains invalid dates") from exc
 
     if timezone is None:
+        if not is_datetime64_any_dtype(timestamps.dtype):
+            raise DatasetContractError(
+                "timestamp column contains mixed timezone offsets; declare a timezone "
+                "in the dataset schema so offsets can be normalized explicitly"
+            )
         return timestamps
 
     try:
-        if timestamps.dt.tz is None:
-            return timestamps.dt.tz_localize(timezone)
-        return timestamps.dt.tz_convert(timezone)
-    except (TypeError, ValueError) as exc:
+        if is_datetime64_any_dtype(timestamps.dtype):
+            if timestamps.dt.tz is None:
+                return timestamps.dt.tz_localize(timezone)
+            return timestamps.dt.tz_convert(timezone)
+
+        # Mixed offsets (for example PST/PDT in the car-auction source) can
+        # produce an object dtype. Normalize through UTC, then convert to the
+        # declared business timezone so local calendar boundaries stay stable.
+        normalized = pd.to_datetime(values, errors="raise", utc=True)
+        return normalized.dt.tz_convert(timezone)
+    except (AttributeError, TypeError, ValueError) as exc:
         raise DatasetContractError(
             f"could not apply timezone {timezone!r} to timestamp column"
         ) from exc
