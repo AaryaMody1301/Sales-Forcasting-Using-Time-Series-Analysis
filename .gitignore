@@ -75,6 +75,7 @@ Desktop.ini
 *.bak
 
 # Generated forecasting artifacts
+artifacts/
 results/
 models/
 forecasts/

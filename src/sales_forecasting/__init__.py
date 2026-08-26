@@ -1,5 +1,15 @@
-"""Canonical package for leakage-aware sales forecasting."""
+"""Canonical package for leakage-aware, reproducible sales forecasting."""
 
+from .artifacts import (
+    ExperimentRun,
+    ExperimentSpec,
+    ManifestError,
+    ModelSpec,
+    fingerprint_config,
+    fingerprint_prepared_series,
+    load_run_manifest,
+    record_experiment,
+)
 from .data.catalog import CAR_PRICES_DAILY_MEDIAN, get_builtin_schema
 from .data.prepare import prepare_time_series
 from .data.schema import DatasetContractError, DatasetSchema, PreparedSeries
@@ -20,9 +30,13 @@ __all__ = [
     "DatasetContractError",
     "DatasetSchema",
     "ETSForecaster",
+    "ExperimentRun",
+    "ExperimentSpec",
     "FeatureSpec",
     "GradientBoostingForecaster",
     "LastValueNaiveModel",
+    "ManifestError",
+    "ModelSpec",
     "PreparedSeries",
     "RandomForestForecaster",
     "XGBoostForecaster",
@@ -31,8 +45,12 @@ __all__ = [
     "build_supervised_frame",
     "calculate_metrics",
     "expanding_window_backtest",
+    "fingerprint_config",
+    "fingerprint_prepared_series",
     "get_builtin_schema",
+    "load_run_manifest",
     "prepare_time_series",
+    "record_experiment",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
