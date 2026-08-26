@@ -4,27 +4,32 @@
 
 1. Observed timestamps and observed targets only.
 2. Explicit time frequency and transaction aggregation.
-3. Missing periods are never silently filled by the data-contract layer.
-4. Backtesting owns train/test separation; individual models receive training data only.
-5. Every challenger is evaluated against a deterministic naive baseline on the same folds.
-6. ML target-history features must stop at `t-1` when predicting `t`.
-7. Multi-step autoregressive ML forecasts are recursive and may use earlier predictions, not hidden future actuals.
-8. Generated metrics are benchmark evidence only when they come from the canonical evaluator.
-9. A completed experiment is trusted only through its manifest and checksum-verified artifacts.
-10. The dashboard consumes explicit manifest paths; it never infers model identity from filenames.
+3. The data-contract layer never silently imputes gaps.
+4. Backtesting owns train/test separation; models receive training data only.
+5. Missing-value handling is applied independently to training folds only.
+6. Held-out target values are never imputed for evaluation.
+7. Every challenger is compared against a deterministic naive baseline on identical folds.
+8. ML target-history features stop at `t-1` when predicting `t`.
+9. Multi-step autoregressive forecasts may use earlier predictions, never hidden future actuals.
+10. Hyperparameter selection must be nested inside chronological training-side validation.
+11. Generated metrics are benchmark evidence only through checksum-verified manifests.
+12. The CLI, artifact store, and dashboard use the same canonical evaluation code.
 
 ## Canonical package
 
 ```text
 src/sales_forecasting/
+├── cli.py
 ├── data/
 │   ├── schema.py
 │   ├── prepare.py
+│   ├── missing.py
 │   └── catalog.py
 ├── evaluation/
 │   ├── metrics.py
 │   ├── backtesting.py
-│   └── leaderboard.py
+│   ├── leaderboard.py
+│   └── tuning.py
 ├── features/
 │   └── lags.py
 ├── models/
@@ -41,77 +46,71 @@ src/sales_forecasting/
     └── app.py
 ```
 
-## Evaluation boundary
+## Missing-period boundary
 
-The evaluator slices the complete series at a forecast origin and constructs a `PreparedSeries` containing only the training portion. Models never receive the held-out target window during `fit()`.
+`prepare_time_series()` can expose gaps after regularization, but it does not resolve them. The evaluator applies the selected policy after slicing each training fold.
 
-For ML row `t`, lag and rolling values are derived from `series[:t]`. Calendar features can describe timestamp `t` because the timestamp is known before its target is observed.
-
-At inference, autoregressive ML forecasts are recursive:
+Supported policies:
 
 ```text
-history -> predict t+1
-history + prediction(t+1) -> predict t+2
-...
+error        -> fail when training contains a gap
+forward_fill -> each missing training value may use only an earlier observed value
 ```
+
+No backward fill is allowed. No interpolation that depends on later timestamps is allowed. A missing value in the outer test window always fails evaluation because the true target is required for scoring.
+
+The selected policy is part of the experiment configuration fingerprint.
+
+## Nested tuning boundary
+
+`NestedTunedForecaster.fit(outer_training)` performs this sequence:
+
+```text
+outer training history
+  -> inner expanding-window folds
+  -> evaluate every parameter candidate
+  -> select best candidate by inner metric
+  -> refit selected candidate on all outer training history
+  -> forecast outer test window
+```
+
+The outer test window is not available during parameter selection. Tuning metadata is attached to each forecast result and persisted in the fold-metrics artifact as strict JSON.
+
+## CLI boundary
+
+The installed command is:
+
+```text
+sales-forecast
+```
+
+Subcommands:
+
+- `inspect`: validate and summarize the prepared dataset contract.
+- `run`: evaluate a reproducible leaderboard and write a manifest-backed run.
+- `tune`: evaluate one nested-tuned ML challenger against the same naive baseline.
+
+The root `run_forecasting.py` is only a compatibility shim to this CLI. It contains no independent forecasting logic.
 
 ## Run identity
 
-`record_experiment()` fingerprints two independent inputs:
+`record_experiment()` fingerprints:
 
-1. **Dataset fingerprint** - SHA-256 over the prepared series schema, timestamp sequence, and target values.
-2. **Configuration fingerprint** - SHA-256 over evaluation settings, model implementation/configuration metadata, package version, and code revision.
+1. prepared dataset schema/timestamps/values;
+2. evaluation settings, including missing policy;
+3. model configuration and metadata;
+4. package version and code revision.
 
-The run ID is derived from those fingerprints:
+This keeps causal preprocessing and tuning choices inside the reproducibility boundary.
 
-```text
-<dataset-name>-<dataset-hash-prefix>-<config-hash-prefix>
-```
+## Artifact trust boundary
 
-Given the same prepared data, effective configuration, package version, and code revision, the run ID is stable.
-
-## Manifest contract
-
-Each completed run contains `manifest.json` with schema version 1. It records:
-
-- run ID and completion timestamp
-- package/Python/dependency versions
-- source revision
-- dataset schema, range, row counts, and SHA-256 fingerprint
-- evaluation horizon, step, train size, baseline, and config fingerprint
-- model implementation/configuration, ranks, and aggregate metrics
-- explicit paths to leaderboard/fold/forecast artifacts
-- SHA-256 checksum and byte size for every referenced CSV
-
-The manifest is written only after the other artifacts are staged successfully.
-
-## Artifact write boundary
-
-Runs are assembled in a temporary sibling directory first. Only after all CSVs and the manifest have been written successfully is the staging directory moved into the deterministic final run path. If the same run is repeated, the prior completed directory is temporarily backed up and restored if replacement fails.
-
-Generated run directories live under `artifacts/` and are ignored by Git.
-
-## Dashboard trust boundary
-
-The Streamlit dashboard discovers only:
-
-```text
-artifacts/runs/*/manifest.json
-```
-
-Before reading a CSV, the dashboard:
-
-1. validates the manifest schema/version/status;
-2. rejects absolute or path-traversal artifact paths;
-3. verifies the file SHA-256 against the manifest;
-4. only then loads the CSV.
-
-A missing, modified, or malformed artifact is displayed as an integrity error, not replaced with synthetic fallback values.
+Each completed run contains a manifest plus checksummed leaderboard, fold metrics, and forecasts. The dashboard verifies those checksums before reading artifacts.
 
 ## CI
 
-GitHub Actions installs the canonical package (including the dashboard extra), runs the test suite, and imports the dashboard entry point on supported Python versions. This provides a repository-level quality gate for future phases.
+GitHub Actions runs the complete test suite on Python 3.10 and 3.13, imports the dashboard entry point, and smoke-tests the installed CLI help command.
 
-## Future work
+## Next
 
-Hyperparameter tuning must be nested inside chronological training/validation folds. Final test windows cannot choose hyperparameters. Known-future regressors and Prophet require an explicit future-covariate contract. Ensembles must derive weights from validation data rather than final test results.
+Known-future regressors require an explicit train/future covariate contract before Prophet can be added. Ensemble weights must be learned from training-side validation rather than outer test results.
