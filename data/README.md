@@ -1,6 +1,6 @@
 # Data
 
-Raw external datasets are intentionally not stored in the v1 release tree.
+Raw external datasets are intentionally not stored in the v1 release tree. See `../THIRD_PARTY_NOTICES.md` for the repository's third-party provenance/attribution policy.
 
 ## Vehicle sales benchmark
 
@@ -17,13 +17,15 @@ The original source contains used-vehicle auction transactions. The v1 preparati
 5. selects the longest contiguous observed weekly segment;
 6. does not impute target values.
 
-`benchmarks/car_prices_weekly_median.meta.json` records the exact source-cleaning counts and the GitHub Actions acceptance run that produced the reviewed series.
+`benchmarks/car_prices_weekly_median.meta.json` records the exact source-cleaning counts and the GitHub Actions acceptance run that produced the reviewed series. `benchmarks/release_v1_expected.json` records the accepted release-benchmark rank/RMSE evidence used by the current numerical regression gate.
 
 To regenerate the derived benchmark, download the raw `car_prices.csv` yourself and run:
 
 ```bash
 python scripts/prepare_vehicle_sales.py --input /path/to/car_prices.csv
 ```
+
+The raw source remains governed by the upstream dataset's license and terms; consult the source page before redistributing it.
 
 ## Amazon product/review data
 
