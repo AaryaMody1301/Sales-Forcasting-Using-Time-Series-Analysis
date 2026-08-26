@@ -4,19 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sales-forecasting-time-series"
-version = "0.1.0"
+version = "0.2.0"
 description = "Leakage-aware foundations for reproducible time-series forecasting."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Aarya Mody" }]
 dependencies = [
+    "numpy>=1.26,<3",
     "pandas>=2.2,<4",
+    "statsmodels>=0.14,<0.15",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8,<9",
+    "pytest>=8,<10",
 ]
 
 [tool.setuptools.packages.find]

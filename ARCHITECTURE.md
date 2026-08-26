@@ -1,6 +1,6 @@
-# Phase 1 Architecture
+# Forecasting Architecture
 
-This document defines the canonical architecture introduced during the repository refactor.
+This document defines the canonical architecture introduced by the repository refactor.
 
 ## Principles
 
@@ -8,42 +8,40 @@ This document defines the canonical architecture introduced during the repositor
 2. **Observed targets only.** A forecast target must represent the quantity being modeled. A proxy such as `price * rating_count` cannot be labeled daily sales.
 3. **Explicit frequency.** Every forecasting dataset declares the period it represents (`D`, `W`, `MS`, and so on).
 4. **Explicit aggregation.** Transaction/event data with many rows per period must declare how rows become one target value per period.
-5. **No silent imputation.** Missing periods remain missing at the dataset-contract layer. Later preprocessing must learn any imputation rule from training data only.
-6. **One model interface.** All Phase 2+ model implementations use `ForecastModel`.
-7. **Backtesting is separate from future forecasting.** Phase 2 will build a time-aware evaluator around the canonical contracts instead of allowing each model to define its own test logic.
+5. **No silent imputation.** Missing periods remain missing at the dataset-contract layer. Preprocessing must learn any imputation rule from training data only.
+6. **One model interface.** All canonical model implementations use `ForecastModel`.
+7. **Backtesting is separate from future forecasting.** The evaluator owns chronological splits; models only fit the training series they receive and forecast the requested horizon.
+8. **Every serious model must beat a baseline.** Phase 2 introduces `LastValueNaiveModel` as the minimum benchmark.
 
 ## Canonical source tree
 
 ```text
 src/
 └── sales_forecasting/
-    ├── __init__.py
     ├── data/
     │   ├── schema.py
     │   ├── prepare.py
     │   └── catalog.py
+    ├── evaluation/
+    │   ├── metrics.py
+    │   └── backtesting.py
     └── models/
-        └── base.py
+        ├── base.py
+        ├── naive.py
+        └── statistical.py
 ```
 
-The older modules directly under `src/` are legacy code. They remain temporarily so the refactor can migrate behavior deliberately rather than performing a risky one-shot rewrite. New implementation work must go into `src/sales_forecasting/`.
+The older modules directly under `src/` are legacy code. They remain temporarily so behavior can be migrated deliberately. New implementation work must go into `src/sales_forecasting/`.
 
 ## Dataset contracts
 
-A `DatasetSchema` declares:
-
-- timestamp column
-- target column
-- frequency
-- optional aggregation for event/transaction data
-- optional timezone
-- explicitly known future regressors
+A `DatasetSchema` declares the timestamp column, target column, frequency, optional aggregation, optional timezone, and explicitly known future regressors.
 
 `prepare_time_series()` validates these requirements, sorts observations, performs only the requested aggregation, regularizes the index, and reports missing periods. It does **not** fill those gaps.
 
 ### Car prices
 
-The bundled car transaction dataset can support several legitimate forecasting questions. Phase 1 registers one conservative example:
+The first built-in car contract represents daily median selling price:
 
 ```text
 dataset: car_prices_daily_median
@@ -53,15 +51,13 @@ frequency: daily
 aggregation: median
 ```
 
-This represents daily median selling price. Future phases can add separately named schemas for daily transaction count or revenue.
-
 ### Amazon product/review data
 
-The bundled Amazon file is not registered as a forecasting dataset. It lacks an observed daily sales time axis and an observed daily sales/revenue target. The previous behavior that generated dates from row order is intentionally not part of the canonical package.
+The bundled Amazon file is not registered as a forecasting dataset because it lacks an observed daily sales time axis and observed daily sales/revenue target.
 
 ## Model contract
 
-Every future model must implement:
+Every canonical model implements:
 
 ```text
 fit(training_series)
@@ -70,21 +66,38 @@ save(path)
 load(path)
 ```
 
-`ForecastResult` standardizes output shape and requires a clean, ordered `DatetimeIndex`.
+Phase 2 includes:
 
-The evaluator—not the model—will own train/test splitting in Phase 2. This prevents individual models from using different definitions of a test forecast.
+- `LastValueNaiveModel`
+- `ARIMAForecaster`
+- `ETSForecaster`
+
+All use the same `ForecastResult` shape.
+
+## Evaluation contract
+
+`expanding_window_backtest()` creates a fresh model for every fold. A fold can only train on observations strictly before its test interval. By default, the next fold advances by the forecast horizon, producing non-overlapping test windows.
+
+The evaluator rejects unresolved missing periods rather than filling them with future information. A later preprocessing phase can introduce causal, training-only gap handling.
+
+Phase 2 reports the same metrics for every model:
+
+- MAE
+- RMSE
+- sMAPE
+- MASE
+- WAPE
+
+MAPE is deliberately not canonical because zero or near-zero actual values make it undefined or unstable.
+
+## Statistical adapters
+
+ARIMA uses `statsmodels.tsa.arima.model.ARIMA`. ETS uses the state-space `statsmodels.tsa.exponential_smoothing.ets.ETSModel`. Model-fitting warnings remain visible; the package does not globally suppress convergence or specification warnings.
 
 ## Generated artifacts
 
-`results/`, `models/`, `forecasts/`, `data/processed/`, compiled Python files, and serialized model files are generated artifacts and should not be committed. Historical/demo artifacts are being removed from the canonical branch because they are not reproducible benchmark evidence.
+`results/`, `models/`, `forecasts/`, `data/processed/`, compiled Python files, and serialized model files are generated artifacts and should not be committed.
 
 ## Next phase
 
-Phase 2 will implement:
-
-1. deterministic naive baseline
-2. rolling/expanding backtesting
-3. common metrics
-4. ETS and ARIMA adapters
-5. ML lag-feature pipeline with no look-ahead
-6. run manifests for dashboard consumption
+Phase 3 will add leakage-safe lag/rolling features, Random Forest/Gradient Boosting/XGBoost adapters, explicit known-future regressor handling, and model comparison against the naive baseline.
