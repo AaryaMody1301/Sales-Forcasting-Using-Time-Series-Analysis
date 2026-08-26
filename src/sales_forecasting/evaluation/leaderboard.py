@@ -7,6 +7,7 @@ from typing import Mapping
 
 import pandas as pd
 
+from sales_forecasting.data.missing import MissingPolicy
 from sales_forecasting.data.schema import PreparedSeries
 
 from .backtesting import BacktestResult, ModelFactory, expanding_window_backtest
@@ -27,6 +28,7 @@ def build_leaderboard(
     horizon: int = 1,
     step: int | None = None,
     baseline_model: str = "naive_last_value",
+    missing_policy: MissingPolicy | str = "error",
 ) -> LeaderboardResult:
     """Backtest every model identically and rank by aggregate RMSE."""
 
@@ -45,6 +47,7 @@ def build_leaderboard(
             initial_train_size=initial_train_size,
             horizon=horizon,
             step=step,
+            missing_policy=missing_policy,
         )
         backtests[label] = result
         metrics = result.aggregate
