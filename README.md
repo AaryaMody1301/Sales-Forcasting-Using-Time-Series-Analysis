@@ -2,9 +2,9 @@
 
 A leakage-aware forecasting project with explicit dataset contracts, chronological evaluation, reproducible artifacts, and a manifest-backed dashboard.
 
-## v1.0 status
+## Release status
 
-Phase 7 is the release-candidate hardening pass. The supported implementation is the `sales_forecasting` package under `src/`; the old parallel forecasting implementations have been removed from the release tree.
+`v1.0.0` is the published baseline release. The `main` branch contains the post-release hardening changes targeting `v1.0.1`. The supported implementation is the `sales_forecasting` package under `src/`; the old parallel forecasting implementations have been removed from the release tree.
 
 Core guarantees:
 
@@ -46,14 +46,18 @@ sales-forecast run \
 Run the full release acceptance benchmark with:
 
 ```bash
-python scripts/release_benchmark.py
+PYTHONPATH=src python scripts/release_benchmark.py
 ```
+
+The canonical GitHub Actions benchmark uses Python `3.13.15` on Ubuntu 24.04 and installs the exact dependency set in `requirements-benchmark.txt`. It also verifies the accepted model ranks and mean-fold RMSE values against `data/benchmarks/release_v1_expected.json`, so material metric drift fails the workflow instead of silently replacing the release evidence.
 
 ### Reviewed v1 benchmark
 
 Target: weekly median vehicle selling price. The benchmark uses the longest contiguous observed weekly segment: 32 observations from 2014-12-21 through 2015-07-26, with **no imputed targets**. Evaluation uses 24 initial training observations and two 4-week holdout folds.
 
-| Rank | Model | RMSE | RMSE vs naive |
+The RMSE shown below is the **arithmetic mean of the two per-fold RMSE values**, not a pooled RMSE over concatenated holdout residuals.
+
+| Rank | Model | Mean fold RMSE | RMSE vs naive |
 |---:|---|---:|---:|
 | 1 | ARIMA(1,1,1) | 1764.63 | -6.73% |
 | 2 | ETS | 1783.29 | -5.74% |
@@ -68,7 +72,7 @@ This is a reproducibility/acceptance benchmark, **not** evidence that ARIMA is u
 
 ## LSTM decision
 
-LSTM is intentionally **not included in v1.0**. The reviewed release series has only 32 contiguous weekly observations, and no leakage-safe LSTM implementation has demonstrated an improvement under the same benchmark protocol. Neural models can be reconsidered after a larger genuine time series is available and they earn inclusion against the same simple baselines.
+LSTM is intentionally **not included in v1**. The reviewed release series has only 32 contiguous weekly observations, and no leakage-safe LSTM implementation has demonstrated an improvement under the same benchmark protocol. Neural models can be reconsidered after a larger genuine time series is available and they earn inclusion against the same simple baselines.
 
 ## CLI
 
@@ -95,7 +99,11 @@ The dashboard only opens completed manifest-backed runs whose referenced artifac
 
 ## Data
 
-See `data/README.md`. The raw ~87 MB vehicle-sales file and the former Amazon product/review file are not included in the v1 release tree. Download raw source data separately and regenerate the reviewed benchmark with `scripts/prepare_vehicle_sales.py`.
+See `data/README.md`. The raw ~87 MB vehicle-sales file and the former Amazon product/review file are not included in the release tree. Download raw source data separately and regenerate the reviewed benchmark with `scripts/prepare_vehicle_sales.py`.
+
+## Security and model artifacts
+
+Some statistical and ML adapters persist fitted Python objects using `pickle`. **Never load a persisted model artifact from an untrusted source.** Pickle deserialization can execute arbitrary code and persisted estimators should be loaded in a compatible dependency environment. See `SECURITY.md` for the repository trust boundary.
 
 ## Project structure
 
@@ -112,6 +120,6 @@ docs/                    architecture/model/release evidence
 
 No accuracy or “best model” claim is a project result unless it comes from the canonical chronological evaluator with identified data/configuration and reproducible artifacts. A more complex model does not earn promotion merely because it is more sophisticated.
 
-## License
+## License and attribution
 
-MIT. See `LICENSE`.
+MIT. See `LICENSE`. Third-party data provenance and notices are recorded in `THIRD_PARTY_NOTICES.md` and `data/README.md`.
