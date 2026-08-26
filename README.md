@@ -1,165 +1,108 @@
 # Sales Forecasting Using Time Series Analysis
 
-A time-series forecasting project being rebuilt around reproducible data contracts, leakage-aware evaluation, and one consistent model API.
+A forecasting project being rebuilt around explicit data contracts, chronological backtesting, and reproducible model comparisons.
 
-## Current status: Phase 2
+## Current status: Phase 3
 
-Phase 1 established the canonical `src/sales_forecasting/` package and explicit dataset contracts. Phase 2 adds the first complete evaluation layer and working baseline/statistical models.
+The canonical implementation lives under `src/sales_forecasting/`. Legacy modules directly under `src/` and the old dashboard remain migration-only code.
 
-The legacy modules directly under `src/`, the old root runner, and the current Streamlit dashboard remain temporarily for migration. New development should target the canonical package only.
+### Phase 1 — data + architecture
+- explicit timestamp / target / frequency contracts
+- no synthetic time axes
+- no silent imputation
+- one `ForecastModel` interface
 
-## Forecastable data rules
+### Phase 2 — evaluation + classical baselines
+- deterministic last-value baseline
+- expanding-window backtesting
+- MAE, RMSE, sMAPE, MASE, WAPE
+- working ARIMA and state-space ETS adapters
 
-A dataset is forecastable only when the project can state explicitly:
+### Phase 3 — leakage-safe ML
+- lag features built strictly from observations before the predicted timestamp
+- rolling mean/std/min/max built from historical values only
+- calendar features derived only from the known forecast timestamp
+- recursive multi-step forecasts: previous predictions feed future lag windows, never hidden actuals
+- Random Forest, Gradient Boosting, and XGBoost adapters
+- one leaderboard that evaluates every model on identical chronological folds
 
-- which column is the observed timestamp;
-- which numeric column is the observed target;
-- what time frequency the target represents;
-- how transaction/event rows are aggregated to one value per period;
-- which regressors, if any, are genuinely known at forecast time.
+## Benchmark policy
 
-The canonical data layer never invents timestamps and never silently fills missing periods.
+The required baseline is `LastValueNaiveModel`. A more complicated model is an improvement only when it beats the baseline on the **same folds and horizon**.
+
+```python
+from sales_forecasting import (
+    FeatureSpec,
+    LastValueNaiveModel,
+    RandomForestForecaster,
+    build_leaderboard,
+)
+
+spec = FeatureSpec(lags=(1, 7, 14, 28), rolling_windows=(7, 14, 28))
+
+leaderboard = build_leaderboard(
+    prepared_series,
+    {
+        "naive_last_value": LastValueNaiveModel,
+        "random_forest": lambda: RandomForestForecaster(feature_spec=spec),
+    },
+    initial_train_size=180,
+    horizon=7,
+)
+
+print(leaderboard.table)
+```
+
+The table includes aggregate metrics, rank, RMSE percentage difference versus the naive baseline, and whether each challenger actually beats that baseline.
+
+## ML feature policy
+
+For a target at time `t`, a feature may use:
+
+```text
+y[t-1], y[t-2], ...
+rolling(y through t-1)
+calendar(t)
+```
+
+It may **not** use:
+
+```text
+y[t]
+y[t+1]
+rolling windows that include y[t]
+values from the held-out forecast horizon
+```
+
+During a 7-step forecast, step 2 can use the prediction from step 1 as a lag. It cannot use the real step-1 target because that value is still unknown at the original forecast origin.
 
 ## Built-in dataset status
 
-### Car prices
-
-`data/car_prices.csv` contains transaction dates. The first reviewed schema converts it to **daily median selling price**.
-
-```python
-import pandas as pd
-from sales_forecasting import CAR_PRICES_DAILY_MEDIAN, prepare_time_series
-
-car_prices = pd.read_csv("data/car_prices.csv")
-prepared = prepare_time_series(car_prices, CAR_PRICES_DAILY_MEDIAN)
-```
-
-Other valid business targets—such as daily sale count or daily revenue—should be registered as separate schemas.
-
-### Amazon product/review data
-
-`data/amazon.csv` is **not** registered as a sales forecasting dataset. It does not contain an observed daily-sales timeline. The old approach that generated dates from row order and used `discounted_price * rating_count` as `daily_sales` is intentionally excluded from the canonical package.
+`data/car_prices.csv` is currently registered as a daily median selling-price series. The bundled Amazon product/review CSV remains excluded because it has no observed daily-sales timeline.
 
 ## Install
 
-Python 3.10+ is required.
+Python 3.10+:
 
 ```bash
 python -m venv .venv
-```
-
-Activate the environment, then install the canonical package and development dependencies:
-
-```bash
 python -m pip install -e ".[dev]"
 pytest
 ```
 
-`requirements.txt` remains temporarily for the legacy application. Canonical dependencies are defined in `pyproject.toml`.
-
-## Phase 2 models
-
-Three models now implement the same contract:
-
-```text
-LastValueNaiveModel
-ARIMAForecaster
-ETSForecaster
-```
-
-Example:
-
-```python
-from sales_forecasting import ARIMAForecaster
-
-model = ARIMAForecaster(order=(1, 1, 1)).fit(training_series)
-future = model.forecast(30)
-```
-
-A model receives only its training series. It does not own or inspect the holdout window.
-
-## Expanding-window backtesting
-
-The evaluator creates a fresh model for every chronological fold:
-
-```python
-from sales_forecasting import LastValueNaiveModel, expanding_window_backtest
-
-result = expanding_window_backtest(
-    prepared,
-    LastValueNaiveModel,
-    initial_train_size=180,
-    horizon=30,
-)
-
-print(result.aggregate)
-```
-
-At each fold, training observations occur strictly before the test interval. The next fold expands its history with observations that would have become known in production.
-
-Missing periods must be resolved by a future training-only preprocessing step; the evaluator refuses to silently impute them.
-
-## Canonical metrics
-
-Every model is compared using:
-
-- MAE
-- RMSE
-- sMAPE
-- MASE
-- WAPE
-
-MAPE is not part of the canonical set because zero/near-zero actuals can make it undefined or misleading.
-
-## Architecture
-
-```text
-.
-├── pyproject.toml
-├── ARCHITECTURE.md
-├── src/
-│   ├── sales_forecasting/
-│   │   ├── data/
-│   │   ├── evaluation/
-│   │   └── models/
-│   └── ... legacy modules pending migration
-└── tests/
-```
-
-See `ARCHITECTURE.md` for the source-of-truth migration rules.
-
-## Benchmark policy
-
-No accuracy, RMSE, MAPE, R², or “best model” result should be presented as a project result unless it is produced by the canonical evaluation pipeline from an identified dataset/configuration and can be reproduced from code.
-
-A complex model should not be promoted as an improvement unless it beats the deterministic naive baseline on the same backtest folds and metric definitions.
-
 ## Roadmap
 
-### Phase 1 — foundation
-- canonical package and project metadata
-- explicit dataset contracts
-- no synthetic time axes
-- one model interface
-- generated/demo artifact cleanup
+### Phase 4 — experiment artifacts + dashboard migration
+- run IDs and JSON manifests
+- dataset/config fingerprints
+- deterministic metric/forecast artifacts
+- dashboard loads manifests instead of guessing files
+- clear distinction between failed runs, demos, and verified benchmarks
 
-### Phase 2 — evaluation + first models
-- deterministic last-value baseline
-- expanding-window backtesting
-- standardized metrics
-- working ETS and ARIMA adapters
-
-### Phase 3 — ML models
-- leakage-safe lag/rolling features
-- Random Forest / Gradient Boosting / XGBoost
-- model comparison against the baseline
-- explicit known-future regressor handling
-
-### Phase 4 — artifacts + dashboard
-- run manifest
-- deterministic result directories
-- dashboard reads manifests instead of guessing filenames
-- proper decomposition and explicit error states
+### Later
+- Prophet only with explicitly supplied future regressors
+- LSTM only after classical and tree baselines are reproducible
+- validation-derived ensemble weights
 
 ## License
 
