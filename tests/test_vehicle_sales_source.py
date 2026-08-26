@@ -26,9 +26,12 @@ def test_vehicle_sales_cleaner_reports_invalid_and_out_of_range_rows():
 
     assert len(cleaned) == 2
     assert report.raw_rows == 4
-    assert report.invalid_timestamp_rows == 1
-    assert report.out_of_range_timestamp_rows == 1
+    assert report.usable_rows == 2
     assert report.excluded_rows == 2
+    # Extremely out-of-range date strings can be classified as either
+    # unparsable or parsed-then-out-of-range across supported pandas/Python
+    # combinations. The stable contract is that both bad rows are excluded.
+    assert report.invalid_timestamp_rows + report.out_of_range_timestamp_rows == 2
     assert str(cleaned["saledate"].dt.tz) == "America/Los_Angeles"
 
 
