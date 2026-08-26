@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "metric_definition": "arithmetic mean of per-fold RMSE across the two outer holdout folds",
   "models": {
     "arima": {
