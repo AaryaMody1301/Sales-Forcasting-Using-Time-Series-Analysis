@@ -1,22 +1,16 @@
 # Sales Forecasting Using Time Series Analysis
 
-A time-series forecasting project currently being refactored for reproducible data preparation, leakage-aware evaluation, and one consistent model API.
+A time-series forecasting project being rebuilt around reproducible data contracts, leakage-aware evaluation, and one consistent model API.
 
-## Refactor status
+## Current status: Phase 2
 
-**Phase 1 is the current foundation.** The repository previously accumulated multiple forecasting runners and helper scripts with incompatible model APIs. Some demo artifacts also used synthetic dates or hard-coded/sample metrics. Those outputs are not treated as benchmark evidence.
+Phase 1 established the canonical `src/sales_forecasting/` package and explicit dataset contracts. Phase 2 adds the first complete evaluation layer and working baseline/statistical models.
 
-The new canonical code lives under:
+The legacy modules directly under `src/`, the old root runner, and the current Streamlit dashboard remain temporarily for migration. New development should target the canonical package only.
 
-```text
-src/sales_forecasting/
-```
+## Forecastable data rules
 
-Legacy modules directly under `src/`, the old root runner, and the current Streamlit dashboard remain temporarily for migration. New development should target the canonical package only.
-
-## Phase 1 rules
-
-A dataset is forecastable only when the project can state, explicitly:
+A dataset is forecastable only when the project can state explicitly:
 
 - which column is the observed timestamp;
 - which numeric column is the observed target;
@@ -24,38 +18,29 @@ A dataset is forecastable only when the project can state, explicitly:
 - how transaction/event rows are aggregated to one value per period;
 - which regressors, if any, are genuinely known at forecast time.
 
-The data layer never invents timestamps and never silently fills missing periods.
-
-Pandas treats resampling as a time-based grouping operation, so transaction-level datasets are converted to a regular series through an explicit aggregation rather than by pretending every row is the next time step.
+The canonical data layer never invents timestamps and never silently fills missing periods.
 
 ## Built-in dataset status
 
 ### Car prices
 
-`data/car_prices.csv` contains transaction dates. The first reviewed schema converts it to **daily median selling price**:
+`data/car_prices.csv` contains transaction dates. The first reviewed schema converts it to **daily median selling price**.
 
 ```python
+import pandas as pd
 from sales_forecasting import CAR_PRICES_DAILY_MEDIAN, prepare_time_series
 
-prepared = prepare_time_series(car_prices_df, CAR_PRICES_DAILY_MEDIAN)
-series = prepared.values
+car_prices = pd.read_csv("data/car_prices.csv")
+prepared = prepare_time_series(car_prices, CAR_PRICES_DAILY_MEDIAN)
 ```
 
-Other valid business targets—such as daily sale count or daily revenue—should be registered as separate schemas instead of being mixed into the same target definition.
+Other valid business targets—such as daily sale count or daily revenue—should be registered as separate schemas.
 
 ### Amazon product/review data
 
-`data/amazon.csv` is **not** registered as a sales forecasting dataset. It does not contain an observed daily-sales timeline. The old approach that generated a date sequence from row order and used `discounted_price * rating_count` as `daily_sales` is intentionally excluded from the new package.
+`data/amazon.csv` is **not** registered as a sales forecasting dataset. It does not contain an observed daily-sales timeline. The old approach that generated dates from row order and used `discounted_price * rating_count` as `daily_sales` is intentionally excluded from the canonical package.
 
-To add an Amazon sales dataset later, use observed records such as:
-
-```text
-timestamp | product_id | units_sold | revenue
-```
-
-and choose an explicit target/frequency.
-
-## Install the Phase 1 package
+## Install
 
 Python 3.10+ is required.
 
@@ -63,16 +48,70 @@ Python 3.10+ is required.
 python -m venv .venv
 ```
 
-Activate the environment, then install the package and tests:
+Activate the environment, then install the canonical package and development dependencies:
 
 ```bash
 python -m pip install -e ".[dev]"
 pytest
 ```
 
-`requirements.txt` is retained temporarily for the legacy application. New package dependency management starts in `pyproject.toml`.
+`requirements.txt` remains temporarily for the legacy application. Canonical dependencies are defined in `pyproject.toml`.
 
-## Canonical architecture
+## Phase 2 models
+
+Three models now implement the same contract:
+
+```text
+LastValueNaiveModel
+ARIMAForecaster
+ETSForecaster
+```
+
+Example:
+
+```python
+from sales_forecasting import ARIMAForecaster
+
+model = ARIMAForecaster(order=(1, 1, 1)).fit(training_series)
+future = model.forecast(30)
+```
+
+A model receives only its training series. It does not own or inspect the holdout window.
+
+## Expanding-window backtesting
+
+The evaluator creates a fresh model for every chronological fold:
+
+```python
+from sales_forecasting import LastValueNaiveModel, expanding_window_backtest
+
+result = expanding_window_backtest(
+    prepared,
+    LastValueNaiveModel,
+    initial_train_size=180,
+    horizon=30,
+)
+
+print(result.aggregate)
+```
+
+At each fold, training observations occur strictly before the test interval. The next fold expands its history with observations that would have become known in production.
+
+Missing periods must be resolved by a future training-only preprocessing step; the evaluator refuses to silently impute them.
+
+## Canonical metrics
+
+Every model is compared using:
+
+- MAE
+- RMSE
+- sMAPE
+- MASE
+- WAPE
+
+MAPE is not part of the canonical set because zero/near-zero actuals can make it undefined or misleading.
+
+## Architecture
 
 ```text
 .
@@ -81,61 +120,46 @@ pytest
 ├── src/
 │   ├── sales_forecasting/
 │   │   ├── data/
-│   │   │   ├── schema.py
-│   │   │   ├── prepare.py
-│   │   │   └── catalog.py
+│   │   ├── evaluation/
 │   │   └── models/
-│   │       └── base.py
 │   └── ... legacy modules pending migration
 └── tests/
 ```
 
-See `ARCHITECTURE.md` for the migration rules.
+See `ARCHITECTURE.md` for the source-of-truth migration rules.
 
-## Canonical model contract
+## Benchmark policy
 
-Every model added in Phase 2 or later will implement the same interface:
+No accuracy, RMSE, MAPE, R², or “best model” result should be presented as a project result unless it is produced by the canonical evaluation pipeline from an identified dataset/configuration and can be reproduced from code.
 
-```text
-fit(training_series)
-forecast(horizon)
-save(path)
-load(path)
-```
-
-Train/test splitting will be owned by a separate evaluator rather than by each individual model. This keeps statistical, ML, and deep-learning models on the same backtesting definition.
+A complex model should not be promoted as an improvement unless it beats the deterministic naive baseline on the same backtest folds and metric definitions.
 
 ## Roadmap
 
 ### Phase 1 — foundation
-- modern `src` package and `pyproject.toml`
+- canonical package and project metadata
 - explicit dataset contracts
 - no synthetic time axes
 - one model interface
-- remove generated/demo artifacts from the canonical source tree
+- generated/demo artifact cleanup
 
 ### Phase 2 — evaluation + first models
-- naive baseline
-- rolling/expanding time-series backtesting
+- deterministic last-value baseline
+- expanding-window backtesting
 - standardized metrics
-- ETS and ARIMA/SARIMA adapters
-- leakage-safe lag features
+- working ETS and ARIMA adapters
 
-### Phase 3 — advanced models
+### Phase 3 — ML models
+- leakage-safe lag/rolling features
 - Random Forest / Gradient Boosting / XGBoost
-- Prophet with explicit future regressors
-- LSTM only after baseline and classical models are reproducible
-- validation-derived ensemble weights
+- model comparison against the baseline
+- explicit known-future regressor handling
 
 ### Phase 4 — artifacts + dashboard
 - run manifest
 - deterministic result directories
 - dashboard reads manifests instead of guessing filenames
-- proper decomposition and error states
-
-## Benchmark policy
-
-No accuracy, RMSE, MAPE, R², or “best model” result should be presented as a project result unless it is produced by the canonical evaluation pipeline from an identified dataset/configuration and can be reproduced from code.
+- proper decomposition and explicit error states
 
 ## License
 
