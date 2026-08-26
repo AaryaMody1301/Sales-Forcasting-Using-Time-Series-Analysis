@@ -96,7 +96,12 @@ class NestedTunedForecaster(ForecastModel):
                 step=self.inner_step,
             )
             score = float(getattr(result.aggregate, self.metric))
-            candidate_scores.append({"params": dict(candidate), "score": score})
+            candidate_scores.append(
+                {
+                    "params": dict(candidate),
+                    "score": score if math.isfinite(score) else None,
+                }
+            )
             if math.isfinite(score) and score < best_score:
                 best_score = score
                 best_params = dict(candidate)
