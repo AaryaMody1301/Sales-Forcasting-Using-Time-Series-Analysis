@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -35,7 +35,7 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,dashboard]"
+          python -m pip install -e ".[dev,dashboard,prophet]"
 
       - name: Run test suite
         run: python -m pytest
@@ -44,4 +44,6 @@ jobs:
         run: python -c "from sales_forecasting.dashboard.app import main"
 
       - name: Smoke test canonical CLI
-        run: sales-forecast --help
+        run: |
+          sales-forecast --help
+          sales-forecast ensemble --help

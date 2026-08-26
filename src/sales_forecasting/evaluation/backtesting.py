@@ -52,6 +52,12 @@ def _aggregate_metrics(folds: list[BacktestFold]) -> ForecastMetrics:
     )
 
 
+def _regressors_through(series: PreparedSeries, end: pd.Timestamp):
+    if series.future_regressors is None:
+        return None
+    return series.future_regressors.loc[:end].copy()
+
+
 def expanding_window_backtest(
     series: PreparedSeries,
     model_factory: ModelFactory,
@@ -63,10 +69,10 @@ def expanding_window_backtest(
 ) -> BacktestResult:
     """Evaluate fresh model instances across expanding chronological folds.
 
-    Missing-value handling is applied independently to each training fold. Test
-    targets are never imputed because they are the observations used to score the
-    forecast. ``forward_fill`` can therefore use only information available before
-    each forecast origin.
+    Target values are sliced at each forecast origin. Known-future regressors may
+    additionally be exposed through the end of that fold's test horizon because
+    their contract says those covariates are available before the target is known.
+    Regressors beyond the current test horizon are not passed to the model.
     """
 
     values = series.values
@@ -111,6 +117,7 @@ def expanding_window_backtest(
             schema=series.schema,
             source_rows=len(train_values),
             missing_periods=int(train_values.isna().sum()),
+            future_regressors=_regressors_through(series, pd.Timestamp(test_values.index[-1])),
         )
         training = apply_training_missing_policy(raw_training, missing_policy)
 

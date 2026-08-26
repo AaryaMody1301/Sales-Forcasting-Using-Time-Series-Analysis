@@ -40,6 +40,7 @@ _DEPENDENCIES = (
     "scikit-learn",
     "statsmodels",
     "xgboost",
+    "prophet",
     "streamlit",
 )
 
@@ -107,7 +108,6 @@ class ModelSpec:
             raise TypeError("model factory must return a ForecastModel")
         if not getattr(model, "name", "").strip():
             raise ValueError("forecast model must expose a non-empty name")
-
         configuration: dict[str, Any] = {}
         for key, value in getattr(model, "__dict__", {}).items():
             if key.startswith("_"):
@@ -208,10 +208,7 @@ def _artifact_metadata(run_dir: Path, relative_paths: Sequence[str]) -> dict[str
     result: dict[str, Any] = {}
     for relative in relative_paths:
         path = run_dir / relative
-        result[relative] = {
-            "sha256": sha256_file(path),
-            "bytes": path.stat().st_size,
-        }
+        result[relative] = {"sha256": sha256_file(path), "bytes": path.stat().st_size}
     return result
 
 
@@ -240,8 +237,6 @@ def record_experiment(
     code_revision: str | None = None,
     package_version: str | None = None,
 ) -> ExperimentRun:
-    """Backtest configured models and persist one self-describing run directory."""
-
     if series.values.empty:
         raise ValueError("cannot record an experiment for an empty series")
     labels = [spec.label for spec in model_specs]
@@ -284,10 +279,7 @@ def record_experiment(
         "code_revision": code_revision,
     }
     config_fingerprint = fingerprint_config(config_payload)
-    run_id = (
-        f"{_slug(series.schema.name)}-"
-        f"{dataset_fingerprint[:10]}-{config_fingerprint[:10]}"
-    )
+    run_id = f"{_slug(series.schema.name)}-{dataset_fingerprint[:10]}-{config_fingerprint[:10]}"
 
     runs_root = Path(artifact_root) / "runs"
     runs_root.mkdir(parents=True, exist_ok=True)
@@ -310,7 +302,6 @@ def record_experiment(
             _write_dataframe(staging / fold_metrics_path, _fold_metrics_frame(backtest))
             _write_dataframe(staging / forecasts_path, _forecast_frame(series, backtest))
             relative_paths.extend([fold_metrics_path, forecasts_path])
-
             row = leaderboard_rows.loc[spec.label]
             model_entries[spec.label] = {
                 "implementation": implementations[spec.label],
@@ -326,6 +317,7 @@ def record_experiment(
             }
 
         artifacts = _artifact_metadata(staging, relative_paths)
+        regressors = series.future_regressors
         manifest = {
             "schema_version": MANIFEST_SCHEMA_VERSION,
             "run_id": run_id,
@@ -347,6 +339,10 @@ def record_experiment(
                 "aggregation": series.schema.aggregation,
                 "timezone": series.schema.timezone,
                 "known_future_regressors": list(series.schema.known_future_regressors),
+                "future_regressor_rows": 0 if regressors is None else len(regressors),
+                "future_regressor_horizon": series.regressor_horizon,
+                "future_regressor_start": None if regressors is None else _timestamp(regressors.index[0]),
+                "future_regressor_end": None if regressors is None else _timestamp(regressors.index[-1]),
                 "source_rows": series.source_rows,
                 "observations": len(series.values),
                 "missing_periods": series.missing_periods,
@@ -358,16 +354,12 @@ def record_experiment(
                 "config_fingerprint_sha256": config_fingerprint,
                 "folds": len(next(iter(leaderboard.backtests.values())).folds),
             },
-            "leaderboard": {
-                "path": leaderboard_path,
-                "rows": len(leaderboard.table),
-            },
+            "leaderboard": {"path": leaderboard_path, "rows": len(leaderboard.table)},
             "models": model_entries,
             "artifacts": artifacts,
         }
         (staging / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True, allow_nan=False)
-            + "\n",
+            json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True, allow_nan=False) + "\n",
             encoding="utf-8",
         )
         _replace_run_directory(staging, run_dir)
@@ -376,9 +368,4 @@ def record_experiment(
             shutil.rmtree(staging, ignore_errors=True)
         raise
 
-    return ExperimentRun(
-        run_id=run_id,
-        run_dir=run_dir,
-        manifest=manifest,
-        leaderboard=leaderboard,
-    )
+    return ExperimentRun(run_id=run_id, run_dir=run_dir, manifest=manifest, leaderboard=leaderboard)
