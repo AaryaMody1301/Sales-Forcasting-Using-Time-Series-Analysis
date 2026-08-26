@@ -34,9 +34,14 @@ jobs:
           python -m pip install -e ".[prophet]"
 
       - name: Run real-data release benchmark
-        run: python scripts/release_benchmark.py
+        shell: bash
+        run: |
+          mkdir -p release_benchmark
+          set -o pipefail
+          python scripts/release_benchmark.py 2>&1 | tee release_benchmark/run.log
 
       - name: Upload benchmark evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-benchmark
