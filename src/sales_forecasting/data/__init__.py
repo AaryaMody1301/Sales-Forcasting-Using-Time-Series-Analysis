@@ -1,8 +1,9 @@
-"""Dataset contracts, preparation, and causal missing-value policies."""
+"""Dataset contracts, preparation, causal missing policies, and future covariates."""
 
 from .catalog import CAR_PRICES_DAILY_MEDIAN, get_builtin_schema
 from .missing import MissingPolicy, apply_training_missing_policy, normalize_missing_policy
 from .prepare import prepare_time_series
+from .regressors import attach_known_future_regressors, future_regressors_for_horizon
 from .schema import DatasetContractError, DatasetSchema, PreparedSeries
 
 __all__ = [
@@ -12,6 +13,8 @@ __all__ = [
     "MissingPolicy",
     "PreparedSeries",
     "apply_training_missing_policy",
+    "attach_known_future_regressors",
+    "future_regressors_for_horizon",
     "get_builtin_schema",
     "normalize_missing_policy",
     "prepare_time_series",

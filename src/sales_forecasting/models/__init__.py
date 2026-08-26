@@ -3,6 +3,7 @@
 from .base import ForecastModel, ForecastResult
 from .ml import GradientBoostingForecaster, RandomForestForecaster, XGBoostForecaster
 from .naive import LastValueNaiveModel
+from .prophet import ProphetForecaster
 from .statistical import ARIMAForecaster, ETSForecaster
 
 __all__ = [
@@ -12,6 +13,7 @@ __all__ = [
     "ForecastResult",
     "GradientBoostingForecaster",
     "LastValueNaiveModel",
+    "ProphetForecaster",
     "RandomForestForecaster",
     "XGBoostForecaster",
 ]
