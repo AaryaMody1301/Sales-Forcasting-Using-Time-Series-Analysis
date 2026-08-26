@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Run the deterministic v1 acceptance benchmark on reviewed weekly data."""
+"""Run and verify the deterministic v1 acceptance benchmark."""
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -26,6 +27,7 @@ from sales_forecasting.models import (
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = ROOT / "data" / "benchmarks" / "car_prices_weekly_median.csv"
 METADATA = ROOT / "data" / "benchmarks" / "car_prices_weekly_median.meta.json"
+EXPECTED = ROOT / "data" / "benchmarks" / "release_v1_expected.json"
 OUTPUT_DIR = ROOT / "release_benchmark"
 
 
@@ -75,6 +77,51 @@ def _factories():
     return factories
 
 
+def _verify_expected(table: pd.DataFrame) -> dict[str, object]:
+    expected = json.loads(EXPECTED.read_text(encoding="utf-8"))
+    if expected.get("schema_version") != 1:
+        raise RuntimeError("unsupported release benchmark expectation schema")
+
+    expected_models = expected.get("models")
+    if not isinstance(expected_models, dict) or not expected_models:
+        raise RuntimeError("release benchmark expectation file has no models")
+
+    actual = table.set_index("model")
+    expected_names = set(expected_models)
+    actual_names = set(actual.index.astype(str))
+    if actual_names != expected_names:
+        raise RuntimeError(
+            "release benchmark model set changed: "
+            f"expected {sorted(expected_names)}, got {sorted(actual_names)}"
+        )
+
+    tolerance = float(expected.get("rmse_absolute_tolerance", 0.0))
+    for model_name, specification in expected_models.items():
+        row = actual.loc[model_name]
+        expected_rank = int(specification["rank"])
+        actual_rank = int(row["rank"])
+        if actual_rank != expected_rank:
+            raise RuntimeError(
+                f"release benchmark rank changed for {model_name}: "
+                f"expected {expected_rank}, got {actual_rank}"
+            )
+
+        expected_rmse = float(specification["mean_fold_rmse"])
+        actual_rmse = float(row["rmse"])
+        if not math.isclose(actual_rmse, expected_rmse, rel_tol=0.0, abs_tol=tolerance):
+            raise RuntimeError(
+                f"release benchmark RMSE changed for {model_name}: "
+                f"expected {expected_rmse:.10f} +/- {tolerance}, got {actual_rmse:.10f}"
+            )
+
+    return {
+        "expected_file": str(EXPECTED.relative_to(ROOT)),
+        "metric_definition": expected["metric_definition"],
+        "rmse_absolute_tolerance": tolerance,
+        "passed": True,
+    }
+
+
 def main() -> int:
     frame = pd.read_csv(DATASET)
     series = prepare_time_series(frame, CAR_PRICES_WEEKLY_MEDIAN)
@@ -90,6 +137,7 @@ def main() -> int:
         baseline_model="naive_last_value",
         missing_policy="error",
     )
+    verification = _verify_expected(leaderboard.table)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     leaderboard.table.to_csv(OUTPUT_DIR / "leaderboard.csv", index=False)
@@ -102,7 +150,9 @@ def main() -> int:
             "step": 4,
             "folds": 2,
             "ranking_metric": "rmse",
+            "aggregate_metric_definition": "arithmetic mean of per-fold metrics",
         },
+        "verification": verification,
         "leaderboard": json.loads(leaderboard.table.to_json(orient="records")),
     }
     (OUTPUT_DIR / "summary.json").write_text(
