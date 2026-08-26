@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.1 (unreleased)
+## 1.0.1 (released 2026-08-26)
 
 ### Reproducibility
 - Locked the canonical release-benchmark environment to Python 3.13.15 and the exact dependency versions from the accepted v1 run.
@@ -16,7 +16,7 @@
 
 ### Release hygiene
 - Updated package metadata and project URLs for the 1.0.1 hardening line.
-- Updated README release wording so `v1.0.0` is identified as published while `main` targets `v1.0.1`.
+- Published `v1.0.1` with wheel and source-distribution assets from the validated release commit.
 - Added Dependabot configuration for Python and GitHub Actions maintenance.
 - Added a tag-triggered release workflow that validates the tag/package version, builds distributions, and attaches them to the GitHub Release.
 
