@@ -10,10 +10,23 @@ from .artifacts import (
     load_run_manifest,
     record_experiment,
 )
-from .data.catalog import CAR_PRICES_DAILY_MEDIAN, get_builtin_schema
-from .data.prepare import prepare_time_series
-from .data.schema import DatasetContractError, DatasetSchema, PreparedSeries
-from .evaluation import build_leaderboard, calculate_metrics, expanding_window_backtest
+from .data import (
+    CAR_PRICES_DAILY_MEDIAN,
+    DatasetContractError,
+    DatasetSchema,
+    MissingPolicy,
+    PreparedSeries,
+    apply_training_missing_policy,
+    get_builtin_schema,
+    normalize_missing_policy,
+    prepare_time_series,
+)
+from .evaluation import (
+    NestedTunedForecaster,
+    build_leaderboard,
+    calculate_metrics,
+    expanding_window_backtest,
+)
 from .features import FeatureSpec, build_feature_row, build_supervised_frame
 from .models import (
     ARIMAForecaster,
@@ -36,10 +49,13 @@ __all__ = [
     "GradientBoostingForecaster",
     "LastValueNaiveModel",
     "ManifestError",
+    "MissingPolicy",
     "ModelSpec",
+    "NestedTunedForecaster",
     "PreparedSeries",
     "RandomForestForecaster",
     "XGBoostForecaster",
+    "apply_training_missing_policy",
     "build_feature_row",
     "build_leaderboard",
     "build_supervised_frame",
@@ -49,8 +65,9 @@ __all__ = [
     "fingerprint_prepared_series",
     "get_builtin_schema",
     "load_run_manifest",
+    "normalize_missing_policy",
     "prepare_time_series",
     "record_experiment",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
