@@ -1,103 +1,59 @@
-# Forecasting Architecture
+# Canonical Forecasting Architecture
 
-This document defines the canonical architecture introduced by the repository refactor.
+## Core rules
 
-## Principles
+1. Observed timestamps and observed targets only.
+2. Explicit time frequency and transaction aggregation.
+3. Missing periods are never silently filled by the data-contract layer.
+4. Backtesting owns train/test separation; individual models receive training data only.
+5. Every challenger is evaluated against a deterministic naive baseline on the same folds.
+6. ML target-history features must stop at `t-1` when predicting `t`.
+7. Multi-step autoregressive ML forecasts are recursive and may use earlier predictions, not hidden future actuals.
+8. Generated metrics are benchmark evidence only when they come from the canonical evaluator.
 
-1. **Observed time only.** Forecasting datasets must contain an observed timestamp column. Code must never manufacture a date range from row order.
-2. **Observed targets only.** A forecast target must represent the quantity being modeled. A proxy such as `price * rating_count` cannot be labeled daily sales.
-3. **Explicit frequency.** Every forecasting dataset declares the period it represents (`D`, `W`, `MS`, and so on).
-4. **Explicit aggregation.** Transaction/event data with many rows per period must declare how rows become one target value per period.
-5. **No silent imputation.** Missing periods remain missing at the dataset-contract layer. Preprocessing must learn any imputation rule from training data only.
-6. **One model interface.** All canonical model implementations use `ForecastModel`.
-7. **Backtesting is separate from future forecasting.** The evaluator owns chronological splits; models only fit the training series they receive and forecast the requested horizon.
-8. **Every serious model must beat a baseline.** Phase 2 introduces `LastValueNaiveModel` as the minimum benchmark.
-
-## Canonical source tree
+## Canonical package
 
 ```text
-src/
-└── sales_forecasting/
-    ├── data/
-    │   ├── schema.py
-    │   ├── prepare.py
-    │   └── catalog.py
-    ├── evaluation/
-    │   ├── metrics.py
-    │   └── backtesting.py
-    └── models/
-        ├── base.py
-        ├── naive.py
-        └── statistical.py
+src/sales_forecasting/
+├── data/
+│   ├── schema.py
+│   ├── prepare.py
+│   └── catalog.py
+├── evaluation/
+│   ├── metrics.py
+│   ├── backtesting.py
+│   └── leaderboard.py
+├── features/
+│   └── lags.py
+└── models/
+    ├── base.py
+    ├── naive.py
+    ├── statistical.py
+    └── ml.py
 ```
 
-The older modules directly under `src/` are legacy code. They remain temporarily so behavior can be migrated deliberately. New implementation work must go into `src/sales_forecasting/`.
+## Leakage boundary
 
-## Dataset contracts
+The evaluator slices the complete series at a forecast origin and constructs a `PreparedSeries` containing only the training portion. An ML model then creates supervised features only inside that training object.
 
-A `DatasetSchema` declares the timestamp column, target column, frequency, optional aggregation, optional timezone, and explicitly known future regressors.
+For row `t`, lag and rolling values are derived from `series[:t]`. Calendar features can describe timestamp `t` because the timestamp is known before its target is observed.
 
-`prepare_time_series()` validates these requirements, sorts observations, performs only the requested aggregation, regularizes the index, and reports missing periods. It does **not** fill those gaps.
-
-### Car prices
-
-The first built-in car contract represents daily median selling price:
+At inference, ML forecasts are recursive:
 
 ```text
-dataset: car_prices_daily_median
-timestamp: saledate
-target: sellingprice
-frequency: daily
-aggregation: median
+history -> predict t+1
+history + prediction(t+1) -> predict t+2
+...
 ```
 
-### Amazon product/review data
+This matches a true fixed-origin multi-step forecast and avoids the previous mistake of generating test lag features from actual holdout values.
 
-The bundled Amazon file is not registered as a forecasting dataset because it lacks an observed daily sales time axis and observed daily sales/revenue target.
+## Leaderboard
 
-## Model contract
+`build_leaderboard()` accepts model factories and applies the same expanding-window configuration to every model. It records each full `BacktestResult` and returns a sortable metric table with RMSE delta versus `naive_last_value`.
 
-Every canonical model implements:
+Model hyperparameter tuning is intentionally not part of this phase. When added, tuning must occur inside training folds or a nested chronological validation procedure; the final test windows cannot be used to choose hyperparameters.
 
-```text
-fit(training_series)
-forecast(horizon)
-save(path)
-load(path)
-```
+## Phase 4
 
-Phase 2 includes:
-
-- `LastValueNaiveModel`
-- `ARIMAForecaster`
-- `ETSForecaster`
-
-All use the same `ForecastResult` shape.
-
-## Evaluation contract
-
-`expanding_window_backtest()` creates a fresh model for every fold. A fold can only train on observations strictly before its test interval. By default, the next fold advances by the forecast horizon, producing non-overlapping test windows.
-
-The evaluator rejects unresolved missing periods rather than filling them with future information. A later preprocessing phase can introduce causal, training-only gap handling.
-
-Phase 2 reports the same metrics for every model:
-
-- MAE
-- RMSE
-- sMAPE
-- MASE
-- WAPE
-
-MAPE is deliberately not canonical because zero or near-zero actual values make it undefined or unstable.
-
-## Statistical adapters
-
-ARIMA uses `statsmodels.tsa.arima.model.ARIMA`. ETS uses the state-space `statsmodels.tsa.exponential_smoothing.ets.ETSModel`. Model-fitting warnings remain visible; the package does not globally suppress convergence or specification warnings.
-
-## Generated artifacts
-
-`results/`, `models/`, `forecasts/`, `data/processed/`, compiled Python files, and serialized model files are generated artifacts and should not be committed.
-
-## Next phase
-
-Phase 3 will add leakage-safe lag/rolling features, Random Forest/Gradient Boosting/XGBoost adapters, explicit known-future regressor handling, and model comparison against the naive baseline.
+The next layer will add run manifests and artifact storage so the dashboard consumes explicit model/run metadata rather than relying on filename patterns or old generated result folders.
