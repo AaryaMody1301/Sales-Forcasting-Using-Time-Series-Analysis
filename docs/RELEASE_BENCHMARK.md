@@ -1,6 +1,6 @@
 # v1 Release Benchmark
 
-This benchmark is an acceptance/reproducibility check for v1.0. It is deliberately not presented as a broad model-performance study.
+This benchmark is an acceptance/reproducibility check for the v1 release line. It is deliberately not presented as a broad model-performance study.
 
 ## Source acceptance
 
@@ -19,6 +19,19 @@ The full weekly grid contains 82 periods with 45 no-auction/no-observation gaps.
 
 The raw-source acceptance workflow completed successfully in GitHub Actions run `32950969967` at commit `c98a7d324c84b763296dab201838c5a03d390774`. Its uploaded artifact digest is recorded in `data/benchmarks/car_prices_weekly_median.meta.json`.
 
+## Reproducible environment
+
+The canonical release-benchmark workflow intentionally uses a narrower environment contract than the normal compatibility CI:
+
+- Ubuntu 24.04 runner family;
+- Python **3.13.15**;
+- pip **26.2.1**;
+- exact runtime/model dependencies from `requirements-benchmark.txt`;
+- source imports from `src/` via `PYTHONPATH`, avoiding an extra editable-build dependency during benchmark execution;
+- a captured `pip freeze` stored in each uploaded benchmark artifact.
+
+Normal users should continue to install the package from `pyproject.toml`; the exact requirements file exists only to make the reviewed acceptance benchmark repeatable.
+
 ## Evaluation
 
 - target: weekly median `sellingprice`
@@ -27,10 +40,12 @@ The raw-source acceptance workflow completed successfully in GitHub Actions run 
 - forecast horizon: 4 weeks
 - step: 4 weeks
 - outer folds: 2
-- ranking metric: RMSE
+- ranking metric: mean fold RMSE
 - target imputation: none
 
-| Rank | Model | MAE | RMSE | sMAPE | WAPE | RMSE vs naive |
+Aggregate metrics are arithmetic means of the per-fold metrics. In particular, the RMSE column below is **mean fold RMSE**, not a pooled RMSE calculated from all holdout residuals concatenated together.
+
+| Rank | Model | MAE | Mean fold RMSE | sMAPE | WAPE | RMSE vs naive |
 |---:|---|---:|---:|---:|---:|---:|
 | 1 | ARIMA(1,1,1) | 1426.29 | **1764.63** | 10.66 | 10.15 | **-6.73%** |
 | 2 | ETS | **1400.45** | 1783.29 | **10.45** | **9.96** | -5.74% |
@@ -42,6 +57,30 @@ The raw-source acceptance workflow completed successfully in GitHub Actions run 
 | 8 | Prophet | 4111.02 | 4333.04 | 34.14 | 30.10 | +129.02% |
 
 Only ARIMA and ETS beat the naive baseline on this acceptance benchmark. That does **not** establish universal superiority: two outer folds and 32 observations are too limited for a broad claim.
+
+## Numerical acceptance gate
+
+`data/benchmarks/release_v1_expected.json` records the accepted model set, rank order, full-precision mean-fold RMSE values, and model-specific drift tolerances from the reviewed run. `scripts/release_benchmark.py` verifies this contract on every release-benchmark workflow run.
+
+A run fails when:
+
+- the evaluated model set changes;
+- a model's rank changes; or
+- a model's mean-fold RMSE exceeds its recorded percentage tolerance.
+
+The gates are intentionally tighter for deterministic/simple models and slightly wider for components whose optimization/composition can vary numerically even inside a locked environment:
+
+| Model family | RMSE drift tolerance |
+|---|---:|
+| Last-value naive | 0.01% |
+| ARIMA / ETS | 0.10% |
+| Random Forest / Gradient Boosting / XGBoost | 0.10% |
+| Prophet | 1.00% |
+| Validation-weighted ensemble | 1.00% |
+
+These are engineering acceptance tolerances, not statistical confidence intervals. Rank order remains an exact requirement. The wider 1% bound for Prophet/ensemble prevents insignificant optimizer/composition variation from masquerading as a release failure while still rejecting material behavior changes.
+
+The script writes `leaderboard.csv` and `summary.json` before raising on verification failure. Therefore failed workflow artifacts preserve the complete observed evidence needed to diagnose a regression rather than only the first error message.
 
 ## LSTM gate
 

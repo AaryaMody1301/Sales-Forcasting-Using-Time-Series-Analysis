@@ -1,0 +1,46 @@
+{
+  "schema_version": 2,
+  "metric_definition": "arithmetic mean of per-fold RMSE across the two outer holdout folds",
+  "models": {
+    "arima": {
+      "rank": 1,
+      "mean_fold_rmse": 1764.6318618366,
+      "rmse_tolerance_pct": 0.1
+    },
+    "ets": {
+      "rank": 2,
+      "mean_fold_rmse": 1783.287047864,
+      "rmse_tolerance_pct": 0.1
+    },
+    "naive_last_value": {
+      "rank": 3,
+      "mean_fold_rmse": 1891.951112478,
+      "rmse_tolerance_pct": 0.01
+    },
+    "validation_weighted_ensemble": {
+      "rank": 4,
+      "mean_fold_rmse": 2600.7186753497,
+      "rmse_tolerance_pct": 1.0
+    },
+    "xgboost": {
+      "rank": 5,
+      "mean_fold_rmse": 2694.4431727725,
+      "rmse_tolerance_pct": 0.1
+    },
+    "gradient_boosting": {
+      "rank": 6,
+      "mean_fold_rmse": 3191.4436348269,
+      "rmse_tolerance_pct": 0.1
+    },
+    "random_forest": {
+      "rank": 7,
+      "mean_fold_rmse": 3234.8124240644,
+      "rmse_tolerance_pct": 0.1
+    },
+    "prophet": {
+      "rank": 8,
+      "mean_fold_rmse": 4333.0400992181,
+      "rmse_tolerance_pct": 1.0
+    }
+  }
+}

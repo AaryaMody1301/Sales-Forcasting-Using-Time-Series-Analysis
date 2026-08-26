@@ -54,7 +54,7 @@ class ProphetForecaster(ForecastModel):
         regressor_mode: str = "additive",
     ) -> None:
         if growth not in {"linear", "flat"}:
-            raise ValueError("Phase 6 Prophet supports growth='linear' or 'flat'")
+            raise ValueError("Prophet adapter supports growth='linear' or 'flat'")
         if seasonality_mode not in {"additive", "multiplicative"}:
             raise ValueError("seasonality_mode must be additive or multiplicative")
         if regressor_mode not in {"additive", "multiplicative"}:
