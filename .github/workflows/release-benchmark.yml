@@ -1,0 +1,50 @@
+name: Release benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[prophet]"
+
+      - name: Run reviewed release benchmark
+        shell: bash
+        run: |
+          mkdir -p release_benchmark
+          set -o pipefail
+          python scripts/release_benchmark.py 2>&1 | tee release_benchmark/run.log
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-benchmark
+          path: release_benchmark/
+          if-no-files-found: error

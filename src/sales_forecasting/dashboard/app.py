@@ -38,8 +38,8 @@ def main() -> None:
 
     if not catalog.runs:
         st.info(
-            "No canonical experiment runs were found. Record one with "
-            "sales_forecasting.record_experiment(), then refresh this page."
+            "No canonical experiment runs were found. Run `sales-forecast run ...`, "
+            "then refresh this page."
         )
         return
 
@@ -66,8 +66,24 @@ def main() -> None:
         st.error(f"Leaderboard integrity check failed: {exc}")
         return
 
+    ranked = leaderboard.sort_values("rank", kind="stable")
+    best = ranked.iloc[0]
+    baseline_rows = leaderboard.loc[leaderboard["model"] == evaluation["baseline_model"]]
+    baseline_rmse = None if baseline_rows.empty else float(baseline_rows.iloc[0]["rmse"])
+    best_rmse = float(best["rmse"])
+    delta = None if baseline_rmse is None else 100.0 * (best_rmse - baseline_rmse) / baseline_rmse
+
+    best1, best2, best3 = st.columns(3)
+    best1.metric("Best model", str(best["model"]))
+    best2.metric("Best RMSE", f"{best_rmse:.4g}")
+    best3.metric(
+        "RMSE vs baseline",
+        "n/a" if delta is None else f"{delta:+.2f}%",
+        delta=None,
+    )
+
     st.subheader("Leaderboard")
-    st.dataframe(leaderboard, width="stretch", hide_index=True)
+    st.dataframe(ranked, width="stretch", hide_index=True)
 
     model_labels = list(manifest["models"])
     model_label = st.selectbox("Model details", model_labels)

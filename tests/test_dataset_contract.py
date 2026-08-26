@@ -27,6 +27,32 @@ def test_car_prices_contract_aggregates_to_daily_median_and_preserves_gap():
     assert prepared.source_rows == 3
 
 
+def test_declared_timezone_normalizes_mixed_dst_offsets():
+    frame = pd.DataFrame(
+        {
+            "date": [
+                "2025-03-02 00:00:00-08:00",
+                "2025-03-09 00:00:00-08:00",
+                "2025-03-16 00:00:00-07:00",
+            ],
+            "sales": [10, 20, 30],
+        }
+    )
+    schema = DatasetSchema(
+        name="weekly_sales",
+        timestamp_col="date",
+        target_col="sales",
+        frequency="W-SUN",
+        timezone="America/Los_Angeles",
+    )
+
+    prepared = prepare_time_series(frame, schema)
+
+    assert prepared.values.tolist() == [10, 20, 30]
+    assert str(prepared.values.index.tz) == "America/Los_Angeles"
+    assert prepared.missing_periods == 0
+
+
 def test_amazon_product_dataset_is_not_registered_as_forecasting_dataset():
     with pytest.raises(DatasetContractError, match="not a time-series sales dataset"):
         get_builtin_schema("amazon")

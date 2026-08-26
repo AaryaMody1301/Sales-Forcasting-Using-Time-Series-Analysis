@@ -1,5 +1,7 @@
 """Canonical package for leakage-aware, reproducible sales forecasting."""
 
+from importlib.metadata import PackageNotFoundError, version
+
 from .artifacts import (
     ExperimentRun,
     ExperimentSpec,
@@ -12,12 +14,15 @@ from .artifacts import (
 )
 from .data import (
     CAR_PRICES_DAILY_MEDIAN,
+    CAR_PRICES_WEEKLY_MEDIAN,
     DatasetContractError,
     DatasetSchema,
     MissingPolicy,
     PreparedSeries,
+    VehicleSalesCleaningReport,
     apply_training_missing_policy,
     attach_known_future_regressors,
+    clean_vehicle_sales_source,
     future_regressors_for_horizon,
     get_builtin_schema,
     normalize_missing_policy,
@@ -44,6 +49,7 @@ from .models import (
 __all__ = [
     "ARIMAForecaster",
     "CAR_PRICES_DAILY_MEDIAN",
+    "CAR_PRICES_WEEKLY_MEDIAN",
     "DatasetContractError",
     "DatasetSchema",
     "ETSForecaster",
@@ -60,6 +66,7 @@ __all__ = [
     "ProphetForecaster",
     "RandomForestForecaster",
     "ValidationWeightedEnsemble",
+    "VehicleSalesCleaningReport",
     "XGBoostForecaster",
     "apply_training_missing_policy",
     "attach_known_future_regressors",
@@ -67,6 +74,7 @@ __all__ = [
     "build_leaderboard",
     "build_supervised_frame",
     "calculate_metrics",
+    "clean_vehicle_sales_source",
     "expanding_window_backtest",
     "fingerprint_config",
     "fingerprint_prepared_series",
@@ -78,4 +86,7 @@ __all__ = [
     "record_experiment",
 ]
 
-__version__ = "0.6.0"
+try:
+    __version__ = version("sales-forecasting-time-series")
+except PackageNotFoundError:
+    __version__ = "0+unknown"

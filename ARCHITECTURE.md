@@ -1,98 +1,51 @@
-# Canonical Forecasting Architecture
+# v1 Architecture
 
-## Core rules
+The v1 package has one supported forecasting path: `src/sales_forecasting/`.
 
-1. Targets must be observed values on an explicit regular time axis.
-2. Train/test separation is owned by the evaluator, never individual models.
-3. Missing-target handling is causal and training-only.
-4. Lag/rolling features stop at `t-1` when predicting `t`.
-5. Hyperparameters are selected only on chronological validation inside outer training history.
-6. A known-future regressor is a separate covariate whose value genuinely exists before the target is observed.
-7. Future covariates are exposed only through the current evaluation horizon; later covariate rows remain hidden from that fold.
-8. Prophet cannot guess a missing declared future regressor.
-9. Ensemble weights are learned from training-side validation, never the outer test results.
-10. Every challenger uses identical outer folds and is compared with the deterministic naive baseline.
-11. Benchmark artifacts are trusted only through a completed manifest and checksum verification.
+## Boundaries
 
-## Package layout
+1. **Source adapters** handle quirks belonging to a named external source and report exclusions explicitly. They never guess malformed targets or timestamps.
+2. **Dataset contracts** define timestamp, target, frequency, aggregation, timezone, and known-future regressors.
+3. **Preparation** regularizes the requested time grid but does not silently fill target gaps.
+4. **Evaluation** owns chronological train/test separation and applies any permitted training-only missing policy after each training fold is sliced.
+5. **Models** receive training targets only. Known-future covariates may extend through the requested forecast horizon, never beyond it during a fold.
+6. **Tuning/ensembles** learn parameters or weights from inner chronological validation contained inside the outer training history.
+7. **Artifacts** fingerprint the dataset/configuration/code revision and store checksum-verified fold forecasts and metrics behind a manifest.
+8. **Dashboard** reads only those manifests; it never infers model identity from filenames or invents fallback metrics.
+
+## Canonical tree
 
 ```text
 src/sales_forecasting/
-├── cli.py
-├── data/
-│   ├── schema.py
-│   ├── prepare.py
-│   ├── missing.py
-│   ├── regressors.py
-│   └── catalog.py
-├── evaluation/
-│   ├── metrics.py
-│   ├── backtesting.py
-│   ├── leaderboard.py
-│   ├── tuning.py
-│   └── ensemble.py
-├── features/
-│   └── lags.py
-├── models/
-│   ├── base.py
-│   ├── naive.py
-│   ├── statistical.py
-│   ├── ml.py
-│   └── prophet.py
 ├── artifacts/
-└── dashboard/
+├── dashboard/
+├── data/
+├── evaluation/
+├── features/
+├── models/
+└── cli.py
 ```
 
-## Known-future covariate boundary
+Legacy parallel runners and model implementations were removed from the v1 release tree. Root `run_forecasting.py` remains only as a compatibility shim to the installed CLI, and root `dashboard.py` remains a small Streamlit launcher.
 
-`PreparedSeries.values` contains observed targets only. `PreparedSeries.future_regressors` is a separate regular dataframe that may extend beyond the final target timestamp.
+## Data policy
 
-```text
-observed target:       t1 ... t100
-known covariates:      t1 ... t100 t101 ... t107
-forecast origin:                  ^
-outer horizon:                       t101 ... t107
-```
+Raw third-party datasets are not versioned in the v1 release tree. The repository ships only a small reviewed weekly vehicle-price benchmark plus provenance metadata. `clean_vehicle_sales_source()` is the source-specific boundary for the original vehicle-sales CSV; malformed/out-of-era rows are excluded and counted before aggregation.
 
-During an outer fold ending at `t107`, the training object may contain regressor values through `t107`, but target values stop at the forecast origin. Values after `t107` are not exposed to that model fit.
+The reviewed benchmark is the longest contiguous observed weekly segment. Missing auction weeks are not filled.
 
-This is materially different from leaking targets: calendar plans, promotions, contracted prices, and similar covariates can be known before their associated sales outcome occurs. A variable whose future value is not known must not be declared through this contract.
+## Evaluation policy
 
-## Prophet boundary
+All leaderboard models are evaluated on the same expanding windows. The deterministic last-value model is always the baseline. Backtesting and future forecasting remain conceptually separate: test targets are used only for scoring after predictions are made.
 
-The Prophet adapter registers only explicitly declared regressors. Training data contains target history plus the regressor history for the same timestamps. Prediction data contains only future timestamps and the corresponding known regressor values.
+ML lag/rolling features stop at `t-1`. Recursive multi-step forecasts may consume earlier predictions, not hidden future actuals.
 
-A missing future covariate is an error. Constant training regressors are rejected because they contain no estimable signal.
+## Model policy
 
-Prophet model persistence uses `prophet.serialize.model_to_json` / `model_from_json`. The future-regressor frame is persisted separately in the adapter payload so a restored fitted model retains the exact forecast-time covariates it was given.
+v1 includes naive, ARIMA, ETS, Random Forest, Gradient Boosting, XGBoost, Prophet, nested tuning, and validation-weighted ensembles. Inclusion in the API is not a performance claim.
 
-## Ensemble boundary
+LSTM is excluded from v1 because the reviewed release series is only 32 contiguous weekly observations and no canonical LSTM has earned inclusion under the same chronological benchmark. See `docs/MODEL_POLICY.md`.
 
-`ValidationWeightedEnsemble.fit(outer_training)` performs:
+## Release evidence
 
-```text
-outer training history
-  -> inner expanding-window evaluation for each member
-  -> member validation score
-  -> inverse-error weights
-  -> refit every member on all outer training history
-  -> weighted forecast for outer holdout
-```
-
-Zero-error members receive all available ensemble weight, shared equally if more than one member has zero validation error. Otherwise weights are proportional to `1 / error^weight_power` and normalized to sum to one.
-
-The member scores, weights, metric, and inner validation settings are attached to forecast metadata and therefore written into fold artifacts.
-
-## Reproducibility
-
-The Phase 6 dataset fingerprint is versioned as `series-v2` and hashes:
-
-- semantic dataset schema;
-- every target timestamp/value;
-- every known-future-regressor timestamp, column name, and value.
-
-The manifest records regressor names, coverage range, row count, and the number of future regressor periods beyond the final target.
-
-## Phase 7
-
-Final hardening will remove/archive the remaining legacy implementations, execute the canonical pipeline against the real car dataset, review model/runtime tradeoffs, decide whether an LSTM adds measurable value, polish portfolio evidence, and prepare v1.0.
+`python scripts/release_benchmark.py` runs the fixed v1 acceptance benchmark from the reviewed CSV. GitHub Actions runs it independently from the normal unit/integration CI matrix. `docs/RELEASE_BENCHMARK.md` records the accepted source-cleaning and leaderboard evidence.
