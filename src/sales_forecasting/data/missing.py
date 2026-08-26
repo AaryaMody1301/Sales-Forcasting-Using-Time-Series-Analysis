@@ -19,27 +19,29 @@ def normalize_missing_policy(policy: str) -> MissingPolicy:
     return normalized  # type: ignore[return-value]
 
 
+def _copy_with_values(series: PreparedSeries, values) -> PreparedSeries:
+    return PreparedSeries(
+        values=values,
+        schema=series.schema,
+        source_rows=series.source_rows,
+        missing_periods=int(values.isna().sum()),
+        future_regressors=(
+            None if series.future_regressors is None else series.future_regressors.copy()
+        ),
+    )
+
+
 def apply_training_missing_policy(
     series: PreparedSeries,
     policy: str = "error",
 ) -> PreparedSeries:
-    """Resolve missing training periods without using future observations.
-
-    ``forward_fill`` is deliberately one-directional: each missing value can use
-    only a value that was already observed at an earlier timestamp. Leading gaps
-    remain invalid because there is no historical value available to fill them.
-    """
+    """Resolve missing training periods without using future target observations."""
 
     policy = normalize_missing_policy(policy)
     values = series.values.astype(float).copy()
 
     if not values.isna().any():
-        return PreparedSeries(
-            values=values,
-            schema=series.schema,
-            source_rows=series.source_rows,
-            missing_periods=0,
-        )
+        return _copy_with_values(series, values)
 
     if policy == "error":
         raise DatasetContractError(
@@ -54,9 +56,4 @@ def apply_training_missing_policy(
             "observation exists"
         )
 
-    return PreparedSeries(
-        values=filled,
-        schema=series.schema,
-        source_rows=series.source_rows,
-        missing_periods=0,
-    )
+    return _copy_with_values(series, filled)
