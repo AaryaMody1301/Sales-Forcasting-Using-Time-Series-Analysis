@@ -23,27 +23,23 @@ CAR_PRICES_WEEKLY_MEDIAN = DatasetSchema(
 )
 
 _BUILTIN_SCHEMAS = {
-    "car_prices": CAR_PRICES_DAILY_MEDIAN,
+    # v1 defaults to weekly because the public auction source is too sparse for
+    # a complete daily target series. The daily contract remains explicit.
+    "car_prices": CAR_PRICES_WEEKLY_MEDIAN,
     "car_prices_daily": CAR_PRICES_DAILY_MEDIAN,
     "car_prices_weekly": CAR_PRICES_WEEKLY_MEDIAN,
 }
 
 
 def get_builtin_schema(name: str) -> DatasetSchema:
-    """Return a reviewed built-in schema.
-
-    The legacy Amazon product/review dataset is deliberately not registered:
-    it has no observed daily sales timestamp/target pair and therefore cannot
-    support a defensible sales time-series benchmark.
-    """
+    """Return a reviewed built-in schema."""
 
     normalized = name.strip().lower()
 
     if normalized == "amazon":
         raise DatasetContractError(
-            "The bundled Amazon product/review dataset is not a time-series "
-            "sales dataset. Provide observed timestamps and an observed sales "
-            "or revenue target instead of generating synthetic dates."
+            "The Amazon product/review dataset is not a time-series sales dataset. "
+            "Provide observed timestamps and an observed sales or revenue target."
         )
 
     try:

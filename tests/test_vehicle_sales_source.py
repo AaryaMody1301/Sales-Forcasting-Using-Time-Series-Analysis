@@ -1,7 +1,12 @@
 import pandas as pd
 import pytest
 
-from sales_forecasting.data import DatasetContractError, clean_vehicle_sales_source
+from sales_forecasting.data import (
+    CAR_PRICES_WEEKLY_MEDIAN,
+    DatasetContractError,
+    clean_vehicle_sales_source,
+    get_builtin_schema,
+)
 
 
 def test_vehicle_sales_cleaner_reports_invalid_and_out_of_range_rows():
@@ -37,3 +42,7 @@ def test_vehicle_sales_cleaner_rejects_large_invalid_fraction():
 
     with pytest.raises(DatasetContractError, match="invalid-row fraction"):
         clean_vehicle_sales_source(frame)
+
+
+def test_v1_car_prices_alias_defaults_to_weekly_contract():
+    assert get_builtin_schema("car_prices") == CAR_PRICES_WEEKLY_MEDIAN

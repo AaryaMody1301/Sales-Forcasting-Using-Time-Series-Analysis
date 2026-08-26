@@ -1,0 +1,29 @@
+{
+  "source": {
+    "name": "Vehicle Sales Data",
+    "url": "https://www.kaggle.com/datasets/syedanwarafridi/vehicle-sales-data",
+    "raw_rows": 558837,
+    "usable_rows": 558799,
+    "excluded_rows": 38,
+    "invalid_timestamp_rows": 33,
+    "out_of_range_timestamp_rows": 5,
+    "invalid_target_rows": 12
+  },
+  "preparation": {
+    "target": "weekly median sellingprice",
+    "frequency": "W-SUN",
+    "timezone": "America/Los_Angeles",
+    "full_weekly_observations": 82,
+    "full_weekly_missing_periods": 45,
+    "selection_policy": "longest_contiguous_observed_weekly_segment",
+    "selected_observations": 32,
+    "selected_start": "2014-12-21T00:00:00-08:00",
+    "selected_end": "2015-07-26T00:00:00-07:00",
+    "imputed_targets": 0
+  },
+  "acceptance_evidence": {
+    "workflow_run_id": 32950969967,
+    "commit": "c98a7d324c84b763296dab201838c5a03d390774",
+    "artifact_digest": "sha256:03d968a7e2965b5524a748317e2903146d0a38fa12448456270cc3349324e10b"
+  }
+}

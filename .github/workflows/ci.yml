@@ -16,7 +16,6 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -37,8 +36,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,dashboard,prophet]"
 
+      - name: Validate installed environment
+        run: |
+          python -m pip check
+          python -m compileall -q src/sales_forecasting
+
       - name: Run test suite
-        run: python -m pytest
+        run: pytest
+
+      - name: Build distributions
+        run: python -m build
 
       - name: Import dashboard entry point
         run: python -c "from sales_forecasting.dashboard.app import main"

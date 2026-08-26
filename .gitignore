@@ -24,15 +24,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
+# Test / coverage / type-check caches
 htmlcov/
 .tox/
 .coverage
@@ -46,7 +38,7 @@ coverage.xml
 *.cover
 .hypothesis/
 
-# Jupyter Notebook
+# Jupyter
 .ipynb_checkpoints/
 
 # Virtual environments
@@ -57,13 +49,11 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE/editor settings
+# IDE / OS
 .vscode/
 .idea/
 .spyderproject
 .spyproject
-
-# OS files
 .DS_Store
 Thumbs.db
 ehthumbs.db
@@ -79,6 +69,7 @@ artifacts/
 results/
 models/
 forecasts/
+release_benchmark/
 data/processed/
 stationarity_test.png
 acf_pacf.png
@@ -86,3 +77,8 @@ acf_pacf.png
 *.pickle
 *.joblib
 *.keras
+
+# Raw external datasets are downloaded separately; only reviewed benchmark data is versioned.
+/data/raw/
+/data/car_prices.csv
+/data/amazon.csv

@@ -1,9 +1,10 @@
 name: Release benchmark
 
 on:
+  pull_request:
+    branches: [main]
   push:
-    branches:
-      - refactor/phase-7-v1-release
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,14 +17,14 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
@@ -33,7 +34,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[prophet]"
 
-      - name: Run real-data release benchmark
+      - name: Run reviewed release benchmark
         shell: bash
         run: |
           mkdir -p release_benchmark
