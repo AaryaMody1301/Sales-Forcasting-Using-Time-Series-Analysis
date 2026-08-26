@@ -1,10 +1,10 @@
 # Sales Forecasting Using Time Series Analysis
 
-A forecasting project rebuilt around explicit data contracts, chronological backtesting, leakage-safe model features, and reproducible experiment artifacts.
+A forecasting project rebuilt around explicit data contracts, chronological backtesting, leakage-safe features, reproducible artifacts, and a canonical CLI.
 
-## Current status: Phase 4
+## Current status: Phase 5
 
-The canonical implementation lives under `src/sales_forecasting/`. Legacy modules directly under `src/` are migration-only code.
+The canonical implementation lives under `src/sales_forecasting/`. The old root runner now forwards to the same CLI so there is one supported execution path.
 
 ### Phase 1 - data + architecture
 - explicit timestamp / target / frequency contracts
@@ -16,69 +16,110 @@ The canonical implementation lives under `src/sales_forecasting/`. Legacy module
 - deterministic last-value baseline
 - expanding-window backtesting
 - MAE, RMSE, sMAPE, MASE, WAPE
-- working ARIMA and state-space ETS adapters
+- ARIMA and state-space ETS adapters
 
 ### Phase 3 - leakage-safe ML
-- lag and rolling features stop at `t-1` when predicting `t`
-- calendar features use only the known forecast timestamp
+- lag and rolling features stop at `t-1`
 - recursive multi-step forecasts never consume hidden holdout targets
 - Random Forest, Gradient Boosting, and XGBoost adapters
-- one leaderboard evaluated on identical chronological folds
+- one shared leaderboard
 
 ### Phase 4 - reproducible runs + dashboard
-- deterministic run IDs derived from dataset, evaluation/model config, and code revision
-- SHA-256 dataset and configuration fingerprints
-- JSON run manifests with code/dependency versions and model metadata
-- checksummed leaderboard, fold-metric, and forecast artifacts
-- atomic run-directory replacement so interrupted writes do not become completed runs
-- manifest-driven Streamlit dashboard with artifact-integrity checks
-- GitHub Actions CI for the canonical package
+- deterministic run IDs and SHA-256 fingerprints
+- schema-versioned manifests and checksummed artifacts
+- manifest-driven Streamlit dashboard
+- GitHub Actions CI
 
-## Record an experiment
+### Phase 5 - CLI + causal missing policy + nested tuning
+- installed `sales-forecast` command with `inspect`, `run`, and `tune` subcommands
+- `run_forecasting.py` is now only a compatibility shim to that CLI
+- missing periods default to `error`; optional `forward_fill` uses prior observations only
+- test/holdout targets are never imputed
+- nested chronological hyperparameter search occurs inside each outer training fold
+- selected tuning parameters and inner scores are retained in fold artifact metadata
 
-```python
-from sales_forecasting import (
-    ExperimentSpec,
-    FeatureSpec,
-    LastValueNaiveModel,
-    ModelSpec,
-    RandomForestForecaster,
-    record_experiment,
-)
+## Install
 
-feature_spec = FeatureSpec(
-    lags=(1, 7, 14, 28),
-    rolling_windows=(7, 14, 28),
-)
+Python 3.10+:
 
-run = record_experiment(
-    prepared_series,
-    (
-        ModelSpec("naive_last_value", LastValueNaiveModel),
-        ModelSpec(
-            "random_forest",
-            lambda: RandomForestForecaster(feature_spec=feature_spec),
-            metadata={"purpose": "phase-4 benchmark"},
-        ),
-    ),
-    ExperimentSpec(
-        initial_train_size=180,
-        horizon=7,
-    ),
-    code_revision="<git-commit-sha>",
-)
-
-print(run.run_id)
-print(run.run_dir)
+```bash
+python -m venv .venv
+python -m pip install -e ".[dev,dashboard]"
 ```
 
-`ModelSpec` records the model implementation plus the public configuration exposed by a fresh model instance. Optional `metadata` is for experiment context and is also included in the configuration fingerprint.
+## CLI
 
-For exact source reproducibility, pass the Git commit SHA as `code_revision`. In GitHub Actions, `GITHUB_SHA` is used automatically when available.
+### Inspect a dataset
+
+```bash
+sales-forecast inspect \
+  --csv data/car_prices.csv \
+  --dataset car_prices
+```
+
+For a custom dataset, provide its semantics explicitly:
+
+```bash
+sales-forecast inspect \
+  --csv data/my_sales.csv \
+  --timestamp-col date \
+  --target-col sales \
+  --frequency D \
+  --aggregation sum
+```
+
+### Run a benchmark
+
+```bash
+sales-forecast run \
+  --csv data/car_prices.csv \
+  --dataset car_prices \
+  --models naive_last_value arima ets random_forest \
+  --initial-train-size 180 \
+  --horizon 7 \
+  --step 7
+```
+
+If regularization created gaps and forward filling is semantically appropriate for the target, it must be requested explicitly:
+
+```bash
+--missing-policy forward_fill
+```
+
+Forward fill is applied independently inside each training fold. Missing targets inside a held-out test window remain an error and are never filled for scoring.
+
+### Nested chronological tuning
+
+Create a JSON grid, for example:
+
+```json
+{
+  "n_estimators": [100, 300],
+  "max_depth": [3, 6]
+}
+```
+
+Then run:
+
+```bash
+sales-forecast tune \
+  --csv data/my_sales.csv \
+  --timestamp-col date \
+  --target-col sales \
+  --frequency D \
+  --model random_forest \
+  --grid rf_grid.json \
+  --initial-train-size 180 \
+  --horizon 7 \
+  --inner-initial-train-size 90 \
+  --inner-horizon 7
+```
+
+The outer fold is still the benchmark fold. Hyperparameters are selected only from inner expanding-window validation performed inside that outer fold's training history.
 
 ## Artifact layout
 
-A completed run is written under a deterministic path:
+Canonical CLI runs use the Phase 4 artifact store:
 
 ```text
 artifacts/
@@ -92,59 +133,42 @@ artifacts/
                 └── forecasts.csv
 ```
 
-The manifest records:
+`fold_metrics.csv` includes strict JSON model metadata for each fold. For tuned models that includes the selected parameter set, inner metric, best inner score, and candidate scores.
 
-- dataset schema and SHA-256 fingerprint
-- evaluation settings and configuration fingerprint
-- package, Python, dependency, and source revision information
-- model implementation/configuration metadata
-- aggregate metrics and baseline comparison
-- relative artifact paths
-- SHA-256 checksum and byte size for every CSV artifact
-
-The dashboard verifies each checksum before loading data. A file that was changed after the run was recorded is rejected rather than silently displayed as benchmark evidence.
+The missing-data policy is part of the experiment configuration, so changing from `error` to `forward_fill` changes the configuration fingerprint and run ID.
 
 ## Dashboard
-
-Install the optional dashboard dependency:
-
-```bash
-python -m pip install -e ".[dashboard]"
-```
-
-Then launch:
 
 ```bash
 streamlit run dashboard.py
 ```
 
-The dashboard only discovers `artifacts/runs/*/manifest.json`. It no longer guesses model names from filenames or falls back to fake metrics when an artifact is missing.
+The dashboard discovers only completed manifests and verifies artifact checksums before reading any CSV.
 
 ## Benchmark policy
 
-The required baseline is `LastValueNaiveModel`. A more complicated model is an improvement only when it beats the baseline on the **same folds and horizon**.
+The required baseline is `LastValueNaiveModel`. A more complicated model is an improvement only when it beats that baseline on the same outer folds and horizon.
 
-No accuracy, RMSE, MAPE, R2, or "best model" claim should be presented as a project result unless it comes from a completed canonical run with a valid manifest and intact artifact checksums.
+Hyperparameters may be selected only from training-side validation. Final outer test windows cannot influence model or parameter selection.
 
-## Built-in dataset status
+No benchmark claim should be presented unless it comes from a completed canonical run with a valid manifest and intact checksums.
+
+## Dataset status
 
 `data/car_prices.csv` is registered as a daily median selling-price series. The bundled Amazon product/review CSV remains excluded because it has no observed daily-sales timeline.
 
 ## Development
 
-Python 3.10+:
-
 ```bash
-python -m venv .venv
-python -m pip install -e ".[dev,dashboard]"
 python -m pytest
+sales-forecast --help
 ```
 
-CI runs the canonical test suite on pull requests and pushes to `main`.
+CI runs the full canonical suite on Python 3.10 and 3.13.
 
 ## Next
 
-A later phase can add a canonical CLI, training-only missing-period policies, nested chronological hyperparameter tuning, known-future regressors/Prophet, validation-derived ensembles, and only then reconsider LSTM models.
+The next phase can add explicit known-future-regressor contracts and Prophet, followed by validation-derived ensembles. LSTM should remain deferred until those simpler approaches are reproducible and justified by the same benchmark protocol.
 
 ## License
 
