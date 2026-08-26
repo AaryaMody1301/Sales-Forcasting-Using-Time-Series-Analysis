@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from sales_forecasting.data import clean_vehicle_sales_source
 from sales_forecasting.data.catalog import (
     CAR_PRICES_DAILY_MEDIAN,
     CAR_PRICES_WEEKLY_MEDIAN,
@@ -30,50 +31,6 @@ from sales_forecasting.models import (
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = ROOT / "data" / "car_prices.csv"
 OUTPUT_DIR = ROOT / "release_benchmark"
-BUSINESS_TIMEZONE = "America/Los_Angeles"
-
-
-def _clean_source(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
-    """Normalize the known Kaggle source and report every excluded row.
-
-    This is intentionally separate from the generic dataset contract. The raw
-    vehicle-sales CSV contains a small number of malformed source rows; they are
-    never guessed or imputed. Invalid timestamps/targets are counted and removed
-    before the regular time-series aggregation step.
-    """
-
-    timestamps_utc = pd.to_datetime(
-        frame["saledate"],
-        errors="coerce",
-        utc=True,
-        format="mixed",
-    )
-    targets = pd.to_numeric(frame["sellingprice"], errors="coerce")
-
-    invalid_timestamp = timestamps_utc.isna()
-    invalid_target = targets.isna()
-    valid = ~(invalid_timestamp | invalid_target)
-
-    cleaned = pd.DataFrame(
-        {
-            "saledate": timestamps_utc.loc[valid].dt.tz_convert(BUSINESS_TIMEZONE),
-            "sellingprice": targets.loc[valid].astype(float),
-        }
-    )
-    report = {
-        "raw_rows": int(len(frame)),
-        "invalid_timestamp_rows": int(invalid_timestamp.sum()),
-        "invalid_target_rows": int(invalid_target.sum()),
-        "excluded_rows": int((~valid).sum()),
-        "usable_rows": int(valid.sum()),
-    }
-    if report["usable_rows"] == 0:
-        raise RuntimeError("vehicle-sales source contains no usable rows")
-    if report["excluded_rows"] / report["raw_rows"] > 0.01:
-        raise RuntimeError(
-            "more than 1% of the source rows are invalid; investigate the source before benchmarking"
-        )
-    return cleaned, report
 
 
 def _longest_observed_run(series: PreparedSeries) -> tuple[PreparedSeries, dict[str, object]]:
@@ -82,7 +39,6 @@ def _longest_observed_run(series: PreparedSeries) -> tuple[PreparedSeries, dict[
     observed = series.values.notna().to_numpy()
     best_start = best_end = None
     run_start = None
-
     for position, is_observed in enumerate(observed):
         if is_observed and run_start is None:
             run_start = position
@@ -94,14 +50,12 @@ def _longest_observed_run(series: PreparedSeries) -> tuple[PreparedSeries, dict[
 
     if best_start is None or best_end is None:
         raise RuntimeError("weekly source contains no contiguous observed segment")
-
     values = series.values.iloc[best_start : best_end + 1].copy()
     if len(values) < 32:
         raise RuntimeError(
             f"longest contiguous weekly segment has only {len(values)} observations; "
             "insufficient for the release benchmark"
         )
-
     selected = PreparedSeries(
         values=values,
         schema=series.schema,
@@ -169,7 +123,7 @@ def main() -> int:
         usecols=["saledate", "sellingprice"],
         low_memory=False,
     )
-    frame, cleaning = _clean_source(raw)
+    frame, cleaning_report = clean_vehicle_sales_source(raw)
 
     daily = prepare_time_series(frame, CAR_PRICES_DAILY_MEDIAN)
     weekly_full = prepare_time_series(frame, CAR_PRICES_WEEKLY_MEDIAN)
@@ -218,7 +172,7 @@ def main() -> int:
     )
 
     summary = {
-        "source_cleaning": cleaning,
+        "source_cleaning": cleaning_report.as_dict(),
         "dataset": {
             "daily": {
                 "observations": len(daily.values),
@@ -248,7 +202,6 @@ def main() -> int:
         json.dumps(summary, indent=2, sort_keys=True, allow_nan=False) + "\n",
         encoding="utf-8",
     )
-
     print(json.dumps(summary, indent=2, sort_keys=True, allow_nan=False))
     return 0
 
