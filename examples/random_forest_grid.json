@@ -1,0 +1,4 @@
+{
+  "n_estimators": [100, 300],
+  "max_depth": [3, 6]
+}

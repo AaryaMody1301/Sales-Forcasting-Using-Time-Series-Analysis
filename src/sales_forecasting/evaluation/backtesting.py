@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Any, Callable, Mapping
 
 import numpy as np
 import pandas as pd
 
+from sales_forecasting.data.missing import MissingPolicy, apply_training_missing_policy, normalize_missing_policy
 from sales_forecasting.data.schema import DatasetContractError, PreparedSeries
 from sales_forecasting.models.base import ForecastModel
 
@@ -25,6 +26,7 @@ class BacktestFold:
     test_end: pd.Timestamp
     metrics: ForecastMetrics
     forecast: pd.Series
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,18 +59,20 @@ def expanding_window_backtest(
     initial_train_size: int,
     horizon: int = 1,
     step: int | None = None,
+    missing_policy: MissingPolicy | str = "error",
 ) -> BacktestResult:
     """Evaluate fresh model instances across expanding chronological folds.
 
-    Each fold fits only on observations strictly earlier than its test window.
-    The next fold may include observations revealed by previous folds, matching
-    a walk-forward production process. The default ``step`` equals ``horizon``
-    so test windows do not overlap.
+    Missing-value handling is applied independently to each training fold. Test
+    targets are never imputed because they are the observations used to score the
+    forecast. ``forward_fill`` can therefore use only information available before
+    each forecast origin.
     """
 
     values = series.values
+    missing_policy = normalize_missing_policy(missing_policy)
 
-    if values.isna().any():
+    if missing_policy == "error" and values.isna().any():
         raise DatasetContractError(
             "backtesting requires a complete series; missing periods must be "
             "handled using training-only preprocessing"
@@ -95,12 +99,20 @@ def expanding_window_backtest(
         train_values = values.iloc[:train_end].copy()
         test_values = values.iloc[train_end : train_end + horizon].copy()
 
-        training = PreparedSeries(
+        if test_values.isna().any():
+            missing_timestamps = [str(ts) for ts in test_values.index[test_values.isna()][:3]]
+            raise DatasetContractError(
+                "backtest test window contains missing targets; evaluation targets "
+                "cannot be imputed. Examples: " + ", ".join(missing_timestamps)
+            )
+
+        raw_training = PreparedSeries(
             values=train_values,
             schema=series.schema,
             source_rows=len(train_values),
-            missing_periods=0,
+            missing_periods=int(train_values.isna().sum()),
         )
+        training = apply_training_missing_policy(raw_training, missing_policy)
 
         model = model_factory()
         if not isinstance(model, ForecastModel):
@@ -117,7 +129,7 @@ def expanding_window_backtest(
         metrics = calculate_metrics(
             actual=test_values.values,
             forecast=predicted.values.values,
-            insample=train_values.values,
+            insample=training.values.values,
         )
 
         if model_name is None:
@@ -128,12 +140,13 @@ def expanding_window_backtest(
         folds.append(
             BacktestFold(
                 fold=fold_number,
-                train_start=pd.Timestamp(train_values.index[0]),
-                train_end=pd.Timestamp(train_values.index[-1]),
+                train_start=pd.Timestamp(training.values.index[0]),
+                train_end=pd.Timestamp(training.values.index[-1]),
                 test_start=pd.Timestamp(test_values.index[0]),
                 test_end=pd.Timestamp(test_values.index[-1]),
                 metrics=metrics,
                 forecast=predicted.values.copy(),
+                metadata=dict(predicted.metadata),
             )
         )
 

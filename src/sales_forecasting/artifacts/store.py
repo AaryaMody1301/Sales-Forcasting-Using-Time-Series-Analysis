@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import pandas as pd
 
+from sales_forecasting.data.missing import MissingPolicy, normalize_missing_policy
 from sales_forecasting.data.schema import PreparedSeries
 from sales_forecasting.evaluation import build_leaderboard
 from sales_forecasting.evaluation.leaderboard import LeaderboardResult
@@ -124,6 +125,7 @@ class ExperimentSpec:
     horizon: int = 1
     step: int | None = None
     baseline_model: str = "naive_last_value"
+    missing_policy: MissingPolicy | str = "error"
 
     def __post_init__(self) -> None:
         if self.initial_train_size < 3:
@@ -134,6 +136,7 @@ class ExperimentSpec:
             raise ValueError("step must be positive when provided")
         if not self.baseline_model.strip():
             raise ValueError("baseline_model must be non-empty")
+        object.__setattr__(self, "missing_policy", normalize_missing_policy(self.missing_policy))
 
     @property
     def effective_step(self) -> int:
@@ -145,6 +148,7 @@ class ExperimentSpec:
             "horizon": self.horizon,
             "step": self.effective_step,
             "baseline_model": self.baseline_model,
+            "missing_policy": self.missing_policy,
             "ranking_metric": "rmse",
         }
 
@@ -173,6 +177,13 @@ def _fold_metrics_frame(backtest) -> pd.DataFrame:
                 "test_start": _timestamp(fold.test_start),
                 "test_end": _timestamp(fold.test_end),
                 **_metric_dict(fold.metrics),
+                "metadata_json": json.dumps(
+                    normalize_json_value(fold.metadata),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                    allow_nan=False,
+                ),
             }
         )
     return pd.DataFrame(rows)
@@ -252,6 +263,7 @@ def record_experiment(
         horizon=experiment.horizon,
         step=experiment.step,
         baseline_model=experiment.baseline_model,
+        missing_policy=experiment.missing_policy,
     )
 
     package_version = package_version or _package_version()

@@ -42,3 +42,6 @@ jobs:
 
       - name: Import dashboard entry point
         run: python -c "from sales_forecasting.dashboard.app import main"
+
+      - name: Smoke test canonical CLI
+        run: sales-forecast --help
