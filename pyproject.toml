@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sales-forecasting-time-series"
-version = "1.0.0"
+version = "1.0.1"
 description = "Leakage-aware, reproducible time-series forecasting with chronological evaluation."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,12 @@ dependencies = [
     "statsmodels>=0.14,<0.15",
     "xgboost>=2.1,<4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/AaryaMody1301/Sales-Forcasting-Using-Time-Series-Analysis"
+Repository = "https://github.com/AaryaMody1301/Sales-Forcasting-Using-Time-Series-Analysis"
+Issues = "https://github.com/AaryaMody1301/Sales-Forcasting-Using-Time-Series-Analysis/issues"
+Changelog = "https://github.com/AaryaMody1301/Sales-Forcasting-Using-Time-Series-Analysis/blob/main/CHANGELOG.md"
 
 [project.scripts]
 sales-forecast = "sales_forecasting.cli:main"
