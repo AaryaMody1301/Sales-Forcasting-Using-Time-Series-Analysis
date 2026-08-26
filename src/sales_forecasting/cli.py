@@ -12,15 +12,17 @@ from typing import Any
 import pandas as pd
 
 from sales_forecasting.artifacts import ExperimentSpec, ModelSpec, record_experiment
+from sales_forecasting.data import attach_known_future_regressors
 from sales_forecasting.data.catalog import get_builtin_schema
 from sales_forecasting.data.prepare import prepare_time_series
 from sales_forecasting.data.schema import DatasetContractError, DatasetSchema, PreparedSeries
-from sales_forecasting.evaluation.tuning import NestedTunedForecaster
+from sales_forecasting.evaluation import NestedTunedForecaster, ValidationWeightedEnsemble
 from sales_forecasting.models import (
     ARIMAForecaster,
     ETSForecaster,
     GradientBoostingForecaster,
     LastValueNaiveModel,
+    ProphetForecaster,
     RandomForestForecaster,
     XGBoostForecaster,
 )
@@ -29,6 +31,7 @@ _MODEL_CLASSES = {
     "naive_last_value": LastValueNaiveModel,
     "arima": ARIMAForecaster,
     "ets": ETSForecaster,
+    "prophet": ProphetForecaster,
     "random_forest": RandomForestForecaster,
     "gradient_boosting": GradientBoostingForecaster,
     "xgboost": XGBoostForecaster,
@@ -39,6 +42,7 @@ _TUNABLE_MODEL_CLASSES = {
     "xgboost": XGBoostForecaster,
 }
 _AGGREGATIONS = ["sum", "mean", "median", "min", "max", "first", "last", "count"]
+_METRICS = ["mae", "rmse", "smape", "mase", "wape"]
 
 
 def _git_revision() -> str | None:
@@ -57,7 +61,7 @@ def _git_revision() -> str | None:
 
 
 def _add_dataset_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--csv", required=True, type=Path, help="Input CSV file")
+    parser.add_argument("--csv", required=True, type=Path, help="Input target CSV file")
     parser.add_argument(
         "--dataset",
         default="custom",
@@ -68,6 +72,20 @@ def _add_dataset_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--frequency")
     parser.add_argument("--aggregation", choices=_AGGREGATIONS)
     parser.add_argument("--timezone")
+    parser.add_argument(
+        "--regressors-csv",
+        type=Path,
+        help="Separate CSV containing historical and genuinely known future covariates",
+    )
+    parser.add_argument(
+        "--regressor-timestamp-col",
+        help="Timestamp column in --regressors-csv",
+    )
+    parser.add_argument(
+        "--regressor-cols",
+        nargs="+",
+        help="Regressor columns whose future values are known at forecast time",
+    )
 
 
 def _schema_from_args(args: argparse.Namespace) -> DatasetSchema:
@@ -95,7 +113,27 @@ def _schema_from_args(args: argparse.Namespace) -> DatasetSchema:
 
 def _load_prepared(args: argparse.Namespace) -> PreparedSeries:
     frame = pd.read_csv(args.csv)
-    return prepare_time_series(frame, _schema_from_args(args))
+    prepared = prepare_time_series(frame, _schema_from_args(args))
+
+    regressor_settings = (
+        args.regressors_csv,
+        args.regressor_timestamp_col,
+        args.regressor_cols,
+    )
+    if any(value is not None for value in regressor_settings):
+        if not all(value is not None for value in regressor_settings):
+            raise ValueError(
+                "known future regressors require --regressors-csv, "
+                "--regressor-timestamp-col, and --regressor-cols together"
+            )
+        regressor_frame = pd.read_csv(args.regressors_csv)
+        prepared = attach_known_future_regressors(
+            prepared,
+            regressor_frame,
+            timestamp_col=args.regressor_timestamp_col,
+            regressor_cols=args.regressor_cols,
+        )
+    return prepared
 
 
 def _experiment_from_args(args: argparse.Namespace) -> ExperimentSpec:
@@ -125,6 +163,8 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
         "end": prepared.values.index[-1].isoformat(),
         "frequency": prepared.schema.frequency,
         "target": prepared.schema.target_col,
+        "known_future_regressors": list(prepared.schema.known_future_regressors),
+        "future_regressor_horizon": prepared.regressor_horizon,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
@@ -210,6 +250,58 @@ def _cmd_tune(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ensemble(args: argparse.Namespace) -> int:
+    prepared = _load_prepared(args)
+    members = list(dict.fromkeys(args.members))
+    if len(members) < 2:
+        raise ValueError("ensemble requires at least two distinct member models")
+    unknown = sorted(set(members).difference(_MODEL_CLASSES))
+    if unknown:
+        raise ValueError("unknown ensemble members: " + ", ".join(unknown))
+    if args.validation_initial_train_size + args.validation_horizon > args.initial_train_size:
+        raise ValueError(
+            "ensemble validation window must fit inside the earliest outer training fold"
+        )
+
+    member_factories = {label: _MODEL_CLASSES[label] for label in members}
+
+    def ensemble_factory():
+        return ValidationWeightedEnsemble(
+            member_factories,
+            validation_initial_train_size=args.validation_initial_train_size,
+            validation_horizon=args.validation_horizon,
+            validation_step=args.validation_step,
+            metric=args.metric,
+            weight_power=args.weight_power,
+        )
+
+    model_specs = [
+        ModelSpec("naive_last_value", LastValueNaiveModel, metadata={"source": "cli"})
+    ]
+    for label in members:
+        if label != "naive_last_value":
+            model_specs.append(
+                ModelSpec(label, _MODEL_CLASSES[label], metadata={"source": "cli", "ensemble_member": True})
+            )
+    model_specs.append(
+        ModelSpec(
+            "validation_weighted_ensemble",
+            ensemble_factory,
+            metadata={"source": "cli", "members": members},
+        )
+    )
+
+    run = record_experiment(
+        prepared,
+        model_specs,
+        _experiment_from_args(args),
+        artifact_root=args.artifact_root,
+        code_revision=_git_revision(),
+    )
+    _print_run(run)
+    return 0
+
+
 def _add_experiment_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--initial-train-size", required=True, type=int)
     parser.add_argument("--horizon", type=int, default=1)
@@ -218,7 +310,7 @@ def _add_experiment_arguments(parser: argparse.ArgumentParser) -> None:
         "--missing-policy",
         choices=["error", "forward_fill"],
         default="error",
-        help="Training-only missing-period policy",
+        help="Training-only target missing-period policy",
     )
     parser.add_argument("--artifact-root", type=Path, default=Path("artifacts"))
 
@@ -240,7 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--models",
         nargs="+",
         default=["naive_last_value", "arima", "ets"],
-        help="Models to evaluate",
+        help="Models to evaluate; Prophet is available as 'prophet' when its optional dependency is installed",
     )
     _add_experiment_arguments(run_parser)
     run_parser.set_defaults(handler=_cmd_run)
@@ -252,16 +344,31 @@ def build_parser() -> argparse.ArgumentParser:
     _add_dataset_arguments(tune_parser)
     tune_parser.add_argument("--model", required=True, choices=sorted(_TUNABLE_MODEL_CLASSES))
     tune_parser.add_argument("--grid", required=True, type=Path, help="JSON parameter grid")
-    tune_parser.add_argument(
-        "--metric",
-        default="rmse",
-        choices=["mae", "rmse", "smape", "mase", "wape"],
-    )
+    tune_parser.add_argument("--metric", default="rmse", choices=_METRICS)
     tune_parser.add_argument("--inner-initial-train-size", required=True, type=int)
     tune_parser.add_argument("--inner-horizon", type=int, default=1)
     tune_parser.add_argument("--inner-step", type=int)
     _add_experiment_arguments(tune_parser)
     tune_parser.set_defaults(handler=_cmd_tune)
+
+    ensemble_parser = subparsers.add_parser(
+        "ensemble",
+        help="Learn ensemble weights from chronological validation folds",
+    )
+    _add_dataset_arguments(ensemble_parser)
+    ensemble_parser.add_argument(
+        "--members",
+        nargs="+",
+        required=True,
+        help="At least two model labels, for example arima ets prophet",
+    )
+    ensemble_parser.add_argument("--validation-initial-train-size", required=True, type=int)
+    ensemble_parser.add_argument("--validation-horizon", type=int, default=1)
+    ensemble_parser.add_argument("--validation-step", type=int)
+    ensemble_parser.add_argument("--metric", choices=_METRICS, default="rmse")
+    ensemble_parser.add_argument("--weight-power", type=float, default=1.0)
+    _add_experiment_arguments(ensemble_parser)
+    ensemble_parser.set_defaults(handler=_cmd_ensemble)
 
     return parser
 

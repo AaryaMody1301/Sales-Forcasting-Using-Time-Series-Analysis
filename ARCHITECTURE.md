@@ -2,20 +2,19 @@
 
 ## Core rules
 
-1. Observed timestamps and observed targets only.
-2. Explicit time frequency and transaction aggregation.
-3. The data-contract layer never silently imputes gaps.
-4. Backtesting owns train/test separation; models receive training data only.
-5. Missing-value handling is applied independently to training folds only.
-6. Held-out target values are never imputed for evaluation.
-7. Every challenger is compared against a deterministic naive baseline on identical folds.
-8. ML target-history features stop at `t-1` when predicting `t`.
-9. Multi-step autoregressive forecasts may use earlier predictions, never hidden future actuals.
-10. Hyperparameter selection must be nested inside chronological training-side validation.
-11. Generated metrics are benchmark evidence only through checksum-verified manifests.
-12. The CLI, artifact store, and dashboard use the same canonical evaluation code.
+1. Targets must be observed values on an explicit regular time axis.
+2. Train/test separation is owned by the evaluator, never individual models.
+3. Missing-target handling is causal and training-only.
+4. Lag/rolling features stop at `t-1` when predicting `t`.
+5. Hyperparameters are selected only on chronological validation inside outer training history.
+6. A known-future regressor is a separate covariate whose value genuinely exists before the target is observed.
+7. Future covariates are exposed only through the current evaluation horizon; later covariate rows remain hidden from that fold.
+8. Prophet cannot guess a missing declared future regressor.
+9. Ensemble weights are learned from training-side validation, never the outer test results.
+10. Every challenger uses identical outer folds and is compared with the deterministic naive baseline.
+11. Benchmark artifacts are trusted only through a completed manifest and checksum verification.
 
-## Canonical package
+## Package layout
 
 ```text
 src/sales_forecasting/
@@ -24,93 +23,76 @@ src/sales_forecasting/
 │   ├── schema.py
 │   ├── prepare.py
 │   ├── missing.py
+│   ├── regressors.py
 │   └── catalog.py
 ├── evaluation/
 │   ├── metrics.py
 │   ├── backtesting.py
 │   ├── leaderboard.py
-│   └── tuning.py
+│   ├── tuning.py
+│   └── ensemble.py
 ├── features/
 │   └── lags.py
 ├── models/
 │   ├── base.py
 │   ├── naive.py
 │   ├── statistical.py
-│   └── ml.py
+│   ├── ml.py
+│   └── prophet.py
 ├── artifacts/
-│   ├── fingerprints.py
-│   ├── manifest.py
-│   └── store.py
 └── dashboard/
-    ├── data.py
-    └── app.py
 ```
 
-## Missing-period boundary
+## Known-future covariate boundary
 
-`prepare_time_series()` can expose gaps after regularization, but it does not resolve them. The evaluator applies the selected policy after slicing each training fold.
-
-Supported policies:
+`PreparedSeries.values` contains observed targets only. `PreparedSeries.future_regressors` is a separate regular dataframe that may extend beyond the final target timestamp.
 
 ```text
-error        -> fail when training contains a gap
-forward_fill -> each missing training value may use only an earlier observed value
+observed target:       t1 ... t100
+known covariates:      t1 ... t100 t101 ... t107
+forecast origin:                  ^
+outer horizon:                       t101 ... t107
 ```
 
-No backward fill is allowed. No interpolation that depends on later timestamps is allowed. A missing value in the outer test window always fails evaluation because the true target is required for scoring.
+During an outer fold ending at `t107`, the training object may contain regressor values through `t107`, but target values stop at the forecast origin. Values after `t107` are not exposed to that model fit.
 
-The selected policy is part of the experiment configuration fingerprint.
+This is materially different from leaking targets: calendar plans, promotions, contracted prices, and similar covariates can be known before their associated sales outcome occurs. A variable whose future value is not known must not be declared through this contract.
 
-## Nested tuning boundary
+## Prophet boundary
 
-`NestedTunedForecaster.fit(outer_training)` performs this sequence:
+The Prophet adapter registers only explicitly declared regressors. Training data contains target history plus the regressor history for the same timestamps. Prediction data contains only future timestamps and the corresponding known regressor values.
+
+A missing future covariate is an error. Constant training regressors are rejected because they contain no estimable signal.
+
+Prophet model persistence uses `prophet.serialize.model_to_json` / `model_from_json`. The future-regressor frame is persisted separately in the adapter payload so a restored fitted model retains the exact forecast-time covariates it was given.
+
+## Ensemble boundary
+
+`ValidationWeightedEnsemble.fit(outer_training)` performs:
 
 ```text
 outer training history
-  -> inner expanding-window folds
-  -> evaluate every parameter candidate
-  -> select best candidate by inner metric
-  -> refit selected candidate on all outer training history
-  -> forecast outer test window
+  -> inner expanding-window evaluation for each member
+  -> member validation score
+  -> inverse-error weights
+  -> refit every member on all outer training history
+  -> weighted forecast for outer holdout
 ```
 
-The outer test window is not available during parameter selection. Tuning metadata is attached to each forecast result and persisted in the fold-metrics artifact as strict JSON.
+Zero-error members receive all available ensemble weight, shared equally if more than one member has zero validation error. Otherwise weights are proportional to `1 / error^weight_power` and normalized to sum to one.
 
-## CLI boundary
+The member scores, weights, metric, and inner validation settings are attached to forecast metadata and therefore written into fold artifacts.
 
-The installed command is:
+## Reproducibility
 
-```text
-sales-forecast
-```
+The Phase 6 dataset fingerprint is versioned as `series-v2` and hashes:
 
-Subcommands:
+- semantic dataset schema;
+- every target timestamp/value;
+- every known-future-regressor timestamp, column name, and value.
 
-- `inspect`: validate and summarize the prepared dataset contract.
-- `run`: evaluate a reproducible leaderboard and write a manifest-backed run.
-- `tune`: evaluate one nested-tuned ML challenger against the same naive baseline.
+The manifest records regressor names, coverage range, row count, and the number of future regressor periods beyond the final target.
 
-The root `run_forecasting.py` is only a compatibility shim to this CLI. It contains no independent forecasting logic.
+## Phase 7
 
-## Run identity
-
-`record_experiment()` fingerprints:
-
-1. prepared dataset schema/timestamps/values;
-2. evaluation settings, including missing policy;
-3. model configuration and metadata;
-4. package version and code revision.
-
-This keeps causal preprocessing and tuning choices inside the reproducibility boundary.
-
-## Artifact trust boundary
-
-Each completed run contains a manifest plus checksummed leaderboard, fold metrics, and forecasts. The dashboard verifies those checksums before reading artifacts.
-
-## CI
-
-GitHub Actions runs the complete test suite on Python 3.10 and 3.13, imports the dashboard entry point, and smoke-tests the installed CLI help command.
-
-## Next
-
-Known-future regressors require an explicit train/future covariate contract before Prophet can be added. Ensemble weights must be learned from training-side validation rather than outer test results.
+Final hardening will remove/archive the remaining legacy implementations, execute the canonical pipeline against the real car dataset, review model/runtime tradeoffs, decide whether an LSTM adds measurable value, polish portfolio evidence, and prepare v1.0.
