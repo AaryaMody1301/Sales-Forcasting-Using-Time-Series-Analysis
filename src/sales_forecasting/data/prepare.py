@@ -11,8 +11,19 @@ from .schema import DatasetContractError, DatasetSchema, PreparedSeries
 def _parse_timestamps(values: pd.Series, timezone: str | None) -> pd.Series:
     try:
         timestamps = pd.to_datetime(values, errors="raise")
-    except (TypeError, ValueError) as exc:
-        raise DatasetContractError("timestamp column contains invalid dates") from exc
+    except (TypeError, ValueError) as first_exc:
+        if timezone is None:
+            raise DatasetContractError("timestamp column contains invalid dates") from first_exc
+
+        # Pandas 3 raises immediately for strings that contain valid mixed UTC
+        # offsets (for example PST/PDT). When a business timezone is explicitly
+        # declared, normalize those aware timestamps through UTC and convert back
+        # to that timezone. Invalid dates still fail because errors="raise".
+        try:
+            normalized = pd.to_datetime(values, errors="raise", utc=True)
+            return normalized.dt.tz_convert(timezone)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise DatasetContractError("timestamp column contains invalid dates") from exc
 
     if timezone is None:
         if not is_datetime64_any_dtype(timestamps.dtype):
@@ -28,9 +39,6 @@ def _parse_timestamps(values: pd.Series, timezone: str | None) -> pd.Series:
                 return timestamps.dt.tz_localize(timezone)
             return timestamps.dt.tz_convert(timezone)
 
-        # Mixed offsets (for example PST/PDT in the car-auction source) can
-        # produce an object dtype. Normalize through UTC, then convert to the
-        # declared business timezone so local calendar boundaries stay stable.
         normalized = pd.to_datetime(values, errors="raise", utc=True)
         return normalized.dt.tz_convert(timezone)
     except (AttributeError, TypeError, ValueError) as exc:
