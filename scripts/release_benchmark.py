@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the v1 release-candidate benchmark on the bundled real car-auction data."""
+"""Run the v1 release-candidate benchmark on the real car-auction source data."""
 
 from __future__ import annotations
 
@@ -29,6 +29,50 @@ from sales_forecasting.models import (
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = ROOT / "data" / "car_prices.csv"
 OUTPUT_DIR = ROOT / "release_benchmark"
+BUSINESS_TIMEZONE = "America/Los_Angeles"
+
+
+def _clean_source(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Normalize the known Kaggle source and report every excluded row.
+
+    This is intentionally separate from the generic dataset contract. The raw
+    vehicle-sales CSV contains a small number of malformed source rows; they are
+    never guessed or imputed. Invalid timestamps/targets are counted and removed
+    before the regular time-series aggregation step.
+    """
+
+    timestamps_utc = pd.to_datetime(
+        frame["saledate"],
+        errors="coerce",
+        utc=True,
+        format="mixed",
+    )
+    targets = pd.to_numeric(frame["sellingprice"], errors="coerce")
+
+    invalid_timestamp = timestamps_utc.isna()
+    invalid_target = targets.isna()
+    valid = ~(invalid_timestamp | invalid_target)
+
+    cleaned = pd.DataFrame(
+        {
+            "saledate": timestamps_utc.loc[valid].dt.tz_convert(BUSINESS_TIMEZONE),
+            "sellingprice": targets.loc[valid].astype(float),
+        }
+    )
+    report = {
+        "raw_rows": int(len(frame)),
+        "invalid_timestamp_rows": int(invalid_timestamp.sum()),
+        "invalid_target_rows": int(invalid_target.sum()),
+        "excluded_rows": int((~valid).sum()),
+        "usable_rows": int(valid.sum()),
+    }
+    if report["usable_rows"] == 0:
+        raise RuntimeError("vehicle-sales source contains no usable rows")
+    if report["excluded_rows"] / report["raw_rows"] > 0.01:
+        raise RuntimeError(
+            "more than 1% of the source rows are invalid; investigate the source before benchmarking"
+        )
+    return cleaned, report
 
 
 def _weekly_feature_spec() -> FeatureSpec:
@@ -75,11 +119,12 @@ def _base_factories():
 
 
 def main() -> int:
-    frame = pd.read_csv(
+    raw = pd.read_csv(
         DATASET,
         usecols=["saledate", "sellingprice"],
         low_memory=False,
     )
+    frame, cleaning = _clean_source(raw)
 
     daily = prepare_time_series(frame, CAR_PRICES_DAILY_MEDIAN)
     weekly = prepare_time_series(frame, CAR_PRICES_WEEKLY_MEDIAN)
@@ -129,10 +174,14 @@ def main() -> int:
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     leaderboard.table.to_csv(OUTPUT_DIR / "leaderboard.csv", index=False)
+    weekly.values.rename("sellingprice").to_csv(
+        OUTPUT_DIR / "car_prices_weekly_median.csv",
+        index_label="saledate",
+    )
 
     summary = {
+        "source_cleaning": cleaning,
         "dataset": {
-            "raw_rows": len(frame),
             "daily": {
                 "observations": len(daily.values),
                 "missing_periods": daily.missing_periods,
