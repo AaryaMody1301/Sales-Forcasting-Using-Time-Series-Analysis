@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sales-forecasting-time-series"
-version = "0.3.0"
+version = "0.4.0"
 description = "Leakage-aware foundations for reproducible time-series forecasting."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dashboard = [
+    "streamlit>=1.61,<2",
+]
 dev = [
     "pytest>=8,<10",
 ]

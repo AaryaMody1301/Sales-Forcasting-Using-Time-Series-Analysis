@@ -10,6 +10,8 @@
 6. ML target-history features must stop at `t-1` when predicting `t`.
 7. Multi-step autoregressive ML forecasts are recursive and may use earlier predictions, not hidden future actuals.
 8. Generated metrics are benchmark evidence only when they come from the canonical evaluator.
+9. A completed experiment is trusted only through its manifest and checksum-verified artifacts.
+10. The dashboard consumes explicit manifest paths; it never infers model identity from filenames.
 
 ## Canonical package
 
@@ -25,20 +27,27 @@ src/sales_forecasting/
 │   └── leaderboard.py
 ├── features/
 │   └── lags.py
-└── models/
-    ├── base.py
-    ├── naive.py
-    ├── statistical.py
-    └── ml.py
+├── models/
+│   ├── base.py
+│   ├── naive.py
+│   ├── statistical.py
+│   └── ml.py
+├── artifacts/
+│   ├── fingerprints.py
+│   ├── manifest.py
+│   └── store.py
+└── dashboard/
+    ├── data.py
+    └── app.py
 ```
 
-## Leakage boundary
+## Evaluation boundary
 
-The evaluator slices the complete series at a forecast origin and constructs a `PreparedSeries` containing only the training portion. An ML model then creates supervised features only inside that training object.
+The evaluator slices the complete series at a forecast origin and constructs a `PreparedSeries` containing only the training portion. Models never receive the held-out target window during `fit()`.
 
-For row `t`, lag and rolling values are derived from `series[:t]`. Calendar features can describe timestamp `t` because the timestamp is known before its target is observed.
+For ML row `t`, lag and rolling values are derived from `series[:t]`. Calendar features can describe timestamp `t` because the timestamp is known before its target is observed.
 
-At inference, ML forecasts are recursive:
+At inference, autoregressive ML forecasts are recursive:
 
 ```text
 history -> predict t+1
@@ -46,14 +55,63 @@ history + prediction(t+1) -> predict t+2
 ...
 ```
 
-This matches a true fixed-origin multi-step forecast and avoids the previous mistake of generating test lag features from actual holdout values.
+## Run identity
 
-## Leaderboard
+`record_experiment()` fingerprints two independent inputs:
 
-`build_leaderboard()` accepts model factories and applies the same expanding-window configuration to every model. It records each full `BacktestResult` and returns a sortable metric table with RMSE delta versus `naive_last_value`.
+1. **Dataset fingerprint** - SHA-256 over the prepared series schema, timestamp sequence, and target values.
+2. **Configuration fingerprint** - SHA-256 over evaluation settings, model implementation/configuration metadata, package version, and code revision.
 
-Model hyperparameter tuning is intentionally not part of this phase. When added, tuning must occur inside training folds or a nested chronological validation procedure; the final test windows cannot be used to choose hyperparameters.
+The run ID is derived from those fingerprints:
 
-## Phase 4
+```text
+<dataset-name>-<dataset-hash-prefix>-<config-hash-prefix>
+```
 
-The next layer will add run manifests and artifact storage so the dashboard consumes explicit model/run metadata rather than relying on filename patterns or old generated result folders.
+Given the same prepared data, effective configuration, package version, and code revision, the run ID is stable.
+
+## Manifest contract
+
+Each completed run contains `manifest.json` with schema version 1. It records:
+
+- run ID and completion timestamp
+- package/Python/dependency versions
+- source revision
+- dataset schema, range, row counts, and SHA-256 fingerprint
+- evaluation horizon, step, train size, baseline, and config fingerprint
+- model implementation/configuration, ranks, and aggregate metrics
+- explicit paths to leaderboard/fold/forecast artifacts
+- SHA-256 checksum and byte size for every referenced CSV
+
+The manifest is written only after the other artifacts are staged successfully.
+
+## Artifact write boundary
+
+Runs are assembled in a temporary sibling directory first. Only after all CSVs and the manifest have been written successfully is the staging directory moved into the deterministic final run path. If the same run is repeated, the prior completed directory is temporarily backed up and restored if replacement fails.
+
+Generated run directories live under `artifacts/` and are ignored by Git.
+
+## Dashboard trust boundary
+
+The Streamlit dashboard discovers only:
+
+```text
+artifacts/runs/*/manifest.json
+```
+
+Before reading a CSV, the dashboard:
+
+1. validates the manifest schema/version/status;
+2. rejects absolute or path-traversal artifact paths;
+3. verifies the file SHA-256 against the manifest;
+4. only then loads the CSV.
+
+A missing, modified, or malformed artifact is displayed as an integrity error, not replaced with synthetic fallback values.
+
+## CI
+
+GitHub Actions installs the canonical package (including the dashboard extra), runs the test suite, and imports the dashboard entry point on supported Python versions. This provides a repository-level quality gate for future phases.
+
+## Future work
+
+Hyperparameter tuning must be nested inside chronological training/validation folds. Final test windows cannot choose hyperparameters. Known-future regressors and Prophet require an explicit future-covariate contract. Ensembles must derive weights from validation data rather than final test results.
