@@ -60,15 +60,27 @@ Only ARIMA and ETS beat the naive baseline on this acceptance benchmark. That do
 
 ## Numerical acceptance gate
 
-`data/benchmarks/release_v1_expected.json` records the accepted model set, rank order, and full-precision mean-fold RMSE values from the reviewed run. `scripts/release_benchmark.py` now verifies those values on every release-benchmark workflow run.
+`data/benchmarks/release_v1_expected.json` records the accepted model set, rank order, full-precision mean-fold RMSE values, and model-specific drift tolerances from the reviewed run. `scripts/release_benchmark.py` verifies this contract on every release-benchmark workflow run.
 
 A run fails when:
 
 - the evaluated model set changes;
 - a model's rank changes; or
-- a model's mean-fold RMSE moves by more than **0.5** target units from the reviewed value.
+- a model's mean-fold RMSE exceeds its recorded percentage tolerance.
 
-The tolerance is intentionally small relative to the benchmark errors while allowing insignificant floating-point/runtime variation.
+The gates are intentionally tighter for deterministic/simple models and slightly wider for components whose optimization/composition can vary numerically even inside a locked environment:
+
+| Model family | RMSE drift tolerance |
+|---|---:|
+| Last-value naive | 0.01% |
+| ARIMA / ETS | 0.10% |
+| Random Forest / Gradient Boosting / XGBoost | 0.10% |
+| Prophet | 1.00% |
+| Validation-weighted ensemble | 1.00% |
+
+These are engineering acceptance tolerances, not statistical confidence intervals. Rank order remains an exact requirement. The wider 1% bound for Prophet/ensemble prevents insignificant optimizer/composition variation from masquerading as a release failure while still rejecting material behavior changes.
+
+The script writes `leaderboard.csv` and `summary.json` before raising on verification failure. Therefore failed workflow artifacts preserve the complete observed evidence needed to diagnose a regression rather than only the first error message.
 
 ## LSTM gate
 
