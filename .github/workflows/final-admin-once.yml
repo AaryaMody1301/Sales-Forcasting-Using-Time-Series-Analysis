@@ -1,0 +1,138 @@
+name: Final repository administration once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/final-admin-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Attempt repository administration and clean merged branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -u
+
+          admin_failed=0
+
+          echo "Attempting to enable immutable releases..."
+          if gh api --method PUT "repos/${GITHUB_REPOSITORY}/immutable-releases"; then
+            echo "immutable releases: enabled"
+          else
+            echo "immutable releases: unavailable to GITHUB_TOKEN"
+            admin_failed=1
+          fi
+
+          cat > /tmp/main-ruleset.json <<'JSON'
+          {
+            "name": "Protect main",
+            "target": "branch",
+            "enforcement": "active",
+            "conditions": {
+              "ref_name": {
+                "include": ["~DEFAULT_BRANCH"],
+                "exclude": []
+              }
+            },
+            "rules": [
+              {"type": "deletion"},
+              {"type": "non_fast_forward"},
+              {
+                "type": "pull_request",
+                "parameters": {
+                  "allowed_merge_methods": ["merge", "squash", "rebase"],
+                  "dismiss_stale_reviews_on_push": false,
+                  "require_code_owner_review": false,
+                  "require_last_push_approval": false,
+                  "required_approving_review_count": 0,
+                  "required_review_thread_resolution": true
+                }
+              },
+              {
+                "type": "required_status_checks",
+                "parameters": {
+                  "do_not_enforce_on_create": false,
+                  "required_status_checks": [
+                    {"context": "test (3.10)"},
+                    {"context": "test (3.13)"},
+                    {"context": "benchmark"}
+                  ],
+                  "strict_required_status_checks_policy": true
+                }
+              }
+            ]
+          }
+          JSON
+
+          if gh api "repos/${GITHUB_REPOSITORY}/rulesets" --jq '.[].name' | grep -Fxq "Protect main"; then
+            echo "main ruleset: already present"
+          elif gh api --method POST "repos/${GITHUB_REPOSITORY}/rulesets" --input /tmp/main-ruleset.json; then
+            echo "main ruleset: created"
+          else
+            echo "main ruleset: unavailable to GITHUB_TOKEN"
+            admin_failed=1
+          fi
+
+          cat > /tmp/tag-ruleset.json <<'JSON'
+          {
+            "name": "Protect version tags",
+            "target": "tag",
+            "enforcement": "active",
+            "conditions": {
+              "ref_name": {
+                "include": ["refs/tags/v*"],
+                "exclude": []
+              }
+            },
+            "rules": [
+              {"type": "deletion"},
+              {"type": "update", "parameters": {"update_allows_fetch_and_merge": false}}
+            ]
+          }
+          JSON
+
+          if gh api "repos/${GITHUB_REPOSITORY}/rulesets" --jq '.[].name' | grep -Fxq "Protect version tags"; then
+            echo "tag ruleset: already present"
+          elif gh api --method POST "repos/${GITHUB_REPOSITORY}/rulesets" --input /tmp/tag-ruleset.json; then
+            echo "tag ruleset: created"
+          else
+            echo "tag ruleset: unavailable to GITHUB_TOKEN"
+            admin_failed=1
+          fi
+
+          echo "Cleaning merged historical branches..."
+          branches=(
+            "hardening/v1.0.1"
+            "refactor/phase-1-foundation"
+            "refactor/phase-2-evaluation-models"
+            "refactor/phase-3-ml-models"
+            "refactor/phase-4-artifacts-dashboard"
+            "refactor/phase-5-cli-tuning"
+            "refactor/phase-6-prophet-ensembles"
+            "refactor/phase-7-v1-release"
+            "release/v1.0.0-publish"
+          )
+          for branch in "${branches[@]}"; do
+            encoded="${branch//\//%2F}"
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${encoded}" >/dev/null 2>&1; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${encoded}"
+              echo "deleted branch: ${branch}"
+            fi
+          done
+
+          if [ "$admin_failed" -ne 0 ]; then
+            echo "::warning::Repository-admin endpoints require Administration (write), which GITHUB_TOKEN does not expose."
+          fi
