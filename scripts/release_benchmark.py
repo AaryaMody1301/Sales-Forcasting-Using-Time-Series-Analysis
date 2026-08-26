@@ -13,6 +13,7 @@ from sales_forecasting.data.catalog import (
     CAR_PRICES_WEEKLY_MEDIAN,
 )
 from sales_forecasting.data.prepare import prepare_time_series
+from sales_forecasting.data.schema import PreparedSeries
 from sales_forecasting.evaluation import build_leaderboard
 from sales_forecasting.evaluation.ensemble import ValidationWeightedEnsemble
 from sales_forecasting.features import FeatureSpec
@@ -75,6 +76,50 @@ def _clean_source(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
     return cleaned, report
 
 
+def _longest_observed_run(series: PreparedSeries) -> tuple[PreparedSeries, dict[str, object]]:
+    """Select the longest contiguous observed block without imputing missing weeks."""
+
+    observed = series.values.notna().to_numpy()
+    best_start = best_end = None
+    run_start = None
+
+    for position, is_observed in enumerate(observed):
+        if is_observed and run_start is None:
+            run_start = position
+        if run_start is not None and (not is_observed or position == len(observed) - 1):
+            run_end = position if is_observed else position - 1
+            if best_start is None or run_end - run_start > best_end - best_start:
+                best_start, best_end = run_start, run_end
+            run_start = None
+
+    if best_start is None or best_end is None:
+        raise RuntimeError("weekly source contains no contiguous observed segment")
+
+    values = series.values.iloc[best_start : best_end + 1].copy()
+    if len(values) < 32:
+        raise RuntimeError(
+            f"longest contiguous weekly segment has only {len(values)} observations; "
+            "insufficient for the release benchmark"
+        )
+
+    selected = PreparedSeries(
+        values=values,
+        schema=series.schema,
+        source_rows=series.source_rows,
+        missing_periods=0,
+    )
+    metadata = {
+        "full_weekly_observations": int(len(series.values)),
+        "full_weekly_missing_periods": int(series.missing_periods),
+        "selected_observations": int(len(values)),
+        "selected_start": values.index[0].isoformat(),
+        "selected_end": values.index[-1].isoformat(),
+        "selection_policy": "longest_contiguous_observed_weekly_segment",
+        "imputed_targets": 0,
+    }
+    return selected, metadata
+
+
 def _weekly_feature_spec() -> FeatureSpec:
     return FeatureSpec(
         lags=(1, 2, 4, 8, 13),
@@ -127,28 +172,21 @@ def main() -> int:
     frame, cleaning = _clean_source(raw)
 
     daily = prepare_time_series(frame, CAR_PRICES_DAILY_MEDIAN)
-    weekly = prepare_time_series(frame, CAR_PRICES_WEEKLY_MEDIAN)
-
-    if weekly.missing_periods:
-        missing_examples = [
-            timestamp.isoformat()
-            for timestamp in weekly.values.index[weekly.values.isna()][:5]
-        ]
-        raise RuntimeError(
-            "weekly release benchmark contains missing target periods: "
-            + ", ".join(missing_examples)
-        )
+    weekly_full = prepare_time_series(frame, CAR_PRICES_WEEKLY_MEDIAN)
+    weekly, selection = _longest_observed_run(weekly_full)
 
     horizon = 4
-    holdout_periods = 24
-    initial_train_size = max(40, len(weekly.values) - holdout_periods)
-    if initial_train_size + horizon > len(weekly.values):
-        initial_train_size = len(weekly.values) - horizon
-    if initial_train_size < 32:
-        raise RuntimeError("weekly car-price history is too short for release benchmark")
+    holdout_periods = min(24, max(12, (len(weekly.values) // 3 // horizon) * horizon))
+    initial_train_size = len(weekly.values) - holdout_periods
+    if initial_train_size < 24:
+        initial_train_size = len(weekly.values) - 2 * horizon
+    if initial_train_size < 20 or initial_train_size + horizon > len(weekly.values):
+        raise RuntimeError("selected weekly history is too short for release benchmark")
 
     factories = _base_factories()
-    ensemble_validation_start = max(24, initial_train_size - 20)
+    ensemble_validation_start = max(16, initial_train_size - 16)
+    if ensemble_validation_start + horizon > initial_train_size:
+        ensemble_validation_start = initial_train_size - horizon
     ensemble_members = {
         label: factory
         for label, factory in factories.items()
@@ -189,12 +227,13 @@ def main() -> int:
                 "start": daily.values.index[0].isoformat(),
                 "end": daily.values.index[-1].isoformat(),
             },
-            "weekly": {
-                "observations": len(weekly.values),
-                "missing_periods": weekly.missing_periods,
-                "start": weekly.values.index[0].isoformat(),
-                "end": weekly.values.index[-1].isoformat(),
+            "weekly_full": {
+                "observations": len(weekly_full.values),
+                "missing_periods": weekly_full.missing_periods,
+                "start": weekly_full.values.index[0].isoformat(),
+                "end": weekly_full.values.index[-1].isoformat(),
             },
+            "benchmark_segment": selection,
         },
         "evaluation": {
             "initial_train_size": initial_train_size,
