@@ -1,233 +1,142 @@
-# Advanced Time Series Forecasting Framework
+# Sales Forecasting Using Time Series Analysis
 
-A comprehensive framework for time series forecasting with multiple models, automated preprocessing, hyperparameter tuning, and an interactive dashboard.
+A time-series forecasting project currently being refactored for reproducible data preparation, leakage-aware evaluation, and one consistent model API.
 
-## Features
+## Refactor status
 
-- **Multi-Model Forecasting**: Leverage multiple forecasting methods including statistical, machine learning, and deep learning approaches
-  - Statistical Models: ARIMA, SARIMA, Exponential Smoothing
-  - Machine Learning Models: Random Forest, XGBoost, Gradient Boosting
-  - Deep Learning Models: LSTM
-  - Advanced Models: Prophet
-  - Ensemble Methods: Combining predictions from multiple models
+**Phase 1 is the current foundation.** The repository previously accumulated multiple forecasting runners and helper scripts with incompatible model APIs. Some demo artifacts also used synthetic dates or hard-coded/sample metrics. Those outputs are not treated as benchmark evidence.
 
-- **Advanced Data Preprocessing**:
-  - Automatic date and target column detection
-  - Data validation and quality assessment
-  - Missing value imputation
-  - Anomaly detection and handling
-  - Feature engineering for time series
+The new canonical code lives under:
 
-- **Hyperparameter Optimization**:
-  - Automated model tuning
-  - Cross-validation with time series split
-  - Model performance comparison
+```text
+src/sales_forecasting/
+```
 
-- **Interactive Dashboard**:
-  - Model performance comparison
-  - Forecast visualization
-  - Advanced time series analysis tools
-  - Trend decomposition and seasonality analysis
-  - Automated insights
+Legacy modules directly under `src/`, the old root runner, and the current Streamlit dashboard remain temporarily for migration. New development should target the canonical package only.
 
-## Requirements
+## Phase 1 rules
 
-The framework requires the following dependencies:
+A dataset is forecastable only when the project can state, explicitly:
 
-- numpy>=1.20.0
-- pandas>=1.3.0
-- matplotlib>=3.4.0
-- seaborn>=0.11.0
-- scikit-learn>=1.0.0
-- statsmodels>=0.13.0
-- pmdarima>=1.8.0
-- prophet>=1.0
-- xgboost>=1.5.0
-- tensorflow>=2.8.0
-- streamlit>=1.10.0
-- plotly>=5.3.0
+- which column is the observed timestamp;
+- which numeric column is the observed target;
+- what time frequency the target represents;
+- how transaction/event rows are aggregated to one value per period;
+- which regressors, if any, are genuinely known at forecast time.
 
-For a complete list of dependencies, see the requirements.txt file.
+The data layer never invents timestamps and never silently fills missing periods.
 
-## Installation
+Pandas treats resampling as a time-based grouping operation, so transaction-level datasets are converted to a regular series through an explicit aggregation rather than by pretending every row is the next time step.
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/sales-forecasting-time-series.git
-   cd sales-forecasting-time-series
-   ```
+## Built-in dataset status
 
-2. Create a virtual environment (optional but recommended):
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+### Car prices
 
-3. Install the required packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
+`data/car_prices.csv` contains transaction dates. The first reviewed schema converts it to **daily median selling price**:
 
-4. Generate an updated requirements file (optional):
-   ```bash
-   python generate_requirements.py
-   ```
+```python
+from sales_forecasting import CAR_PRICES_DAILY_MEDIAN, prepare_time_series
 
-## Quick Start
+prepared = prepare_time_series(car_prices_df, CAR_PRICES_DAILY_MEDIAN)
+series = prepared.values
+```
 
-### Running Forecasts on Predefined Datasets
+Other valid business targets—such as daily sale count or daily revenue—should be registered as separate schemas instead of being mixed into the same target definition.
 
-Run forecasting models on the included Amazon dataset:
+### Amazon product/review data
+
+`data/amazon.csv` is **not** registered as a sales forecasting dataset. It does not contain an observed daily-sales timeline. The old approach that generated a date sequence from row order and used `discounted_price * rating_count` as `daily_sales` is intentionally excluded from the new package.
+
+To add an Amazon sales dataset later, use observed records such as:
+
+```text
+timestamp | product_id | units_sold | revenue
+```
+
+and choose an explicit target/frequency.
+
+## Install the Phase 1 package
+
+Python 3.10+ is required.
+
 ```bash
-python run_forecasting.py --dataset amazon --models arima prophet xgboost
+python -m venv .venv
 ```
 
-Run forecasting models on the included Car Prices dataset:
+Activate the environment, then install the package and tests:
+
 ```bash
-python run_forecasting.py --dataset car_prices --models sarima prophet rf
+python -m pip install -e ".[dev]"
+pytest
 ```
 
-### Running Forecasts on Custom Datasets
+`requirements.txt` is retained temporarily for the legacy application. New package dependency management starts in `pyproject.toml`.
 
-Run forecasting models on your own dataset:
-```bash
-python run_forecasting.py --dataset custom --data_path your_dataset.csv
+## Canonical architecture
+
+```text
+.
+├── pyproject.toml
+├── ARCHITECTURE.md
+├── src/
+│   ├── sales_forecasting/
+│   │   ├── data/
+│   │   │   ├── schema.py
+│   │   │   ├── prepare.py
+│   │   │   └── catalog.py
+│   │   └── models/
+│   │       └── base.py
+│   └── ... legacy modules pending migration
+└── tests/
 ```
 
-The framework will automatically detect date and target columns, but you can also specify them:
-```bash
-python run_forecasting.py --dataset custom --data_path your_dataset.csv --date_col date --target_col sales
+See `ARCHITECTURE.md` for the migration rules.
+
+## Canonical model contract
+
+Every model added in Phase 2 or later will implement the same interface:
+
+```text
+fit(training_series)
+forecast(horizon)
+save(path)
+load(path)
 ```
 
-### Launch the Dashboard
+Train/test splitting will be owned by a separate evaluator rather than by each individual model. This keeps statistical, ML, and deep-learning models on the same backtesting definition.
 
-Launch the interactive dashboard:
-```bash
-python run_forecasting.py --only_dashboard
-```
+## Roadmap
 
-Or run forecasts and then launch the dashboard:
-```bash
-python run_forecasting.py --dataset amazon --run_dashboard
-```
+### Phase 1 — foundation
+- modern `src` package and `pyproject.toml`
+- explicit dataset contracts
+- no synthetic time axes
+- one model interface
+- remove generated/demo artifacts from the canonical source tree
 
-## Project Structure
+### Phase 2 — evaluation + first models
+- naive baseline
+- rolling/expanding time-series backtesting
+- standardized metrics
+- ETS and ARIMA/SARIMA adapters
+- leakage-safe lag features
 
-```
-├── data/                  # Raw datasets
-├── src/                   # Source code
-│   ├── README.md          # Source code documentation
-│   ├── analyze_datasets.py  # Dataset analysis & preprocessing
-│   ├── forecasting.py     # Forecasting models implementation
-│   ├── utils.py           # Utility functions
-│   └── ...                # Other source files
-├── models/                # Saved model files
-├── results/               # Forecasting results & visualizations
-├── dashboard.py           # Interactive Streamlit dashboard
-├── run_forecasting.py     # Command-line interface
-├── generate_requirements.py  # Generate requirements.txt
-└── README.md              # Project documentation
-```
+### Phase 3 — advanced models
+- Random Forest / Gradient Boosting / XGBoost
+- Prophet with explicit future regressors
+- LSTM only after baseline and classical models are reproducible
+- validation-derived ensemble weights
 
-## Data Validation
+### Phase 4 — artifacts + dashboard
+- run manifest
+- deterministic result directories
+- dashboard reads manifests instead of guessing filenames
+- proper decomposition and error states
 
-The framework includes robust data validation to ensure your datasets are suitable for time series forecasting:
+## Benchmark policy
 
-- Automatic detection of date and target columns
-- Validation of date formats and continuity
-- Missing value analysis
-- Outlier detection
-- Statistical property assessment
-- Data quality reporting
-
-When loading a custom dataset, a validation report is generated with insights and recommendations.
-
-## Datasets
-
-### Included Datasets
-
-- **Amazon Dataset**: Daily sales data for Amazon products
-  - Date range: Recent dates
-  - Features: Product prices, discounts, ratings, sales estimates
-
-- **Car Prices Dataset**: Used car transaction data
-  - Date range: Recent years
-  - Features: Car make, model, year, odometer reading, selling prices
-
-### Using Custom Datasets
-
-You can use your own dataset by providing a CSV file with at least:
-- A date/time column
-- A numeric target column for forecasting
-
-The framework will automatically:
-1. Detect date and target columns
-2. Validate the dataset for time series forecasting
-3. Preprocess the data appropriately
-4. Generate a validation report with insights
-
-## Models
-
-### Statistical Models
-- **ARIMA**: AutoRegressive Integrated Moving Average
-- **SARIMA**: Seasonal ARIMA for data with seasonality
-- **Exponential Smoothing**: Simple, double, and triple (Holt-Winters)
-
-### Machine Learning Models
-- **Random Forest**: Ensemble of decision trees
-- **XGBoost**: Gradient boosting implementation
-- **Gradient Boosting**: Classic gradient boosting machines
-
-### Deep Learning Models
-- **LSTM**: Long Short-Term Memory networks for sequence modeling
-
-### Advanced Models
-- **Prophet**: Facebook's time series forecasting procedure
-
-### Ensemble Methods
-- Combining predictions from multiple models using weighted averaging
-
-## Interactive Dashboard
-
-The dashboard provides several features:
-
-### Model Comparison
-- Performance metrics visualization
-- Radar charts for multi-metric comparison
-- Sortable model rankings
-
-### Forecast Visualization
-- Interactive time series plots
-- Forecast vs. actual comparison
-- Confidence intervals
-
-### Advanced Analysis
-- Time series decomposition (trend, seasonality, residuals)
-- Seasonal pattern analysis
-- Autocorrelation analysis
-- Statistical tests and distribution analysis
-
-### Automated Insights
-- Key statistics and findings
-- Data quality assessment
-- Forecasting recommendations
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+No accuracy, RMSE, MAPE, R², or “best model” result should be presented as a project result unless it is produced by the canonical evaluation pipeline from an identified dataset/configuration and can be reproduced from code.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- The datasets used in this project are for demonstration purposes
-- This framework incorporates methods from various statistical and machine learning libraries
-- Dashboard design inspired by modern data visualization practices 
+MIT. See `LICENSE`.

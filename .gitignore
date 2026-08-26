@@ -38,47 +38,50 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
 
 # Jupyter Notebook
-.ipynb_checkpoints
+.ipynb_checkpoints/
 
 # Virtual environments
 venv/
 env/
 ENV/
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
+.venv/
 env.bak/
 venv.bak/
 
-# VS Code settings
+# IDE/editor settings
 .vscode/
-
-# Spyder project settings
+.idea/
 .spyderproject
 .spyproject
 
-# PyCharm project settings
-.idea/
-
-# macOS specific files
+# OS files
 .DS_Store
-
-# Windows specific files
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Project specific files
+# Logs / backups
 *.log
 .backup/
-*.bak 
+*.bak
+
+# Generated forecasting artifacts
+results/
+models/
+forecasts/
+data/processed/
+stationarity_test.png
+acf_pacf.png
+*.pkl
+*.pickle
+*.joblib
+*.keras
