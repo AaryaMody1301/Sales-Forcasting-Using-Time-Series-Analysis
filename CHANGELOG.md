@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.1 (unreleased)
+
+### Reproducibility
+- Locked the canonical release-benchmark environment to Python 3.13.15 and the exact dependency versions from the accepted v1 run.
+- Added an explicit numerical acceptance file and made the release benchmark fail on model-set, ranking, or material mean-fold RMSE drift.
+- Captured Python, pip, and `pip freeze` output in uploaded benchmark evidence.
+- Clarified that reported aggregate RMSE is the arithmetic mean of per-fold RMSE values, not pooled holdout RMSE.
+
+### Supply-chain and security
+- Pinned official GitHub Actions to full immutable commit SHAs and disabled persisted checkout credentials.
+- Upgraded benchmark artifact upload to the current pinned `actions/upload-artifact` major.
+- Documented the pickle model-artifact trust boundary in `SECURITY.md` and the README.
+- Added third-party data provenance/notice documentation.
+
+### Release hygiene
+- Updated package metadata and project URLs for the 1.0.1 hardening line.
+- Updated README release wording so `v1.0.0` is identified as published while `main` targets `v1.0.1`.
+- Added Dependabot configuration for Python and GitHub Actions maintenance.
+- Added a tag-triggered release workflow that validates the tag/package version, builds distributions, and attaches them to the GitHub Release.
+
 ## 1.0.0
 
 ### Architecture
