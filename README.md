@@ -4,7 +4,7 @@ A leakage-aware forecasting project with explicit dataset contracts, chronologic
 
 ## Release status
 
-`v1.0.0` is the published baseline release. The `main` branch contains the post-release hardening changes targeting `v1.0.1`. The supported implementation is the `sales_forecasting` package under `src/`; the old parallel forecasting implementations have been removed from the release tree.
+**Project overhaul complete.** `v1.0.1` is the current published release. The supported implementation is the `sales_forecasting` package under `src/`; the old parallel forecasting implementations have been removed from the release tree.
 
 Core guarantees:
 
