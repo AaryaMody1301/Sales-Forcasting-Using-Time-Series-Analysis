@@ -14,7 +14,7 @@ dependencies = [
     "numpy>=1.26,<3",
     "pandas>=2.2,<4",
     "scikit-learn>=1.5,<2",
-    "statsmodels>=0.14,<0.15",
+    "statsmodels>=0.14,<0.16",
     "xgboost>=2.1,<4",
 ]
 
